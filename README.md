@@ -250,6 +250,7 @@ README.md
 - 启动前校验 `uv`、`node`、`npm`
 - 若系统已安装 Python 但未安装 `uv`，启动脚本会先询问用户，再决定是否使用 `uv` 官方安装脚本自动安装
 - 校验 `backend/.venv` 与 `frontend/node_modules` 是否存在
+- 若缺少 `backend/.venv` 或 `frontend/node_modules`，启动脚本会先询问用户，再决定是否自动执行 `uv sync` / `npm install`
 - 实际执行 `uv run python --version` 与 `npm exec vite -- --version` 验证环境可用
 - 校验通过后同时启动前后端开发服务
 - 启动时会明确提示“前端服务窗口”和“后端服务窗口”的用途，并提醒用户运行期间不要关闭终端

@@ -59,6 +59,42 @@ function Install-UvIfPossible {
     Write-Host "[提示] uv 已自动安装完成。" -ForegroundColor Green
 }
 
+function Ensure-BackendEnv {
+    if (Test-Path "$RootDir/backend/.venv") {
+        return
+    }
+
+    $backendChoice = Read-Host "[询问] 未检测到 backend/.venv。是否现在自动执行 uv sync 初始化后端环境？请输入 Y 或 N"
+    if ($backendChoice -notin @("Y", "y")) {
+        Fail-AndExit "[错误] 你已取消初始化后端环境。请执行：cd `"$RootDir/backend`" ; uv sync"
+    }
+
+    Write-Host "[提示] 正在初始化后端环境，请稍候..." -ForegroundColor Yellow
+    try {
+        & uv sync --directory "$RootDir/backend"
+    } catch {
+        Fail-AndExit "[错误] 后端环境初始化失败。请执行：cd `"$RootDir/backend`" ; uv sync"
+    }
+}
+
+function Ensure-FrontendEnv {
+    if (Test-Path "$RootDir/frontend/node_modules") {
+        return
+    }
+
+    $frontendChoice = Read-Host "[询问] 未检测到 frontend/node_modules。是否现在自动执行 npm install 初始化前端环境？请输入 Y 或 N"
+    if ($frontendChoice -notin @("Y", "y")) {
+        Fail-AndExit "[错误] 你已取消初始化前端环境。请执行：cd `"$RootDir/frontend`" ; npm install"
+    }
+
+    Write-Host "[提示] 正在初始化前端环境，请稍候..." -ForegroundColor Yellow
+    try {
+        & npm install --prefix "$RootDir/frontend"
+    } catch {
+        Fail-AndExit "[错误] 前端环境初始化失败。请执行：cd `"$RootDir/frontend`" ; npm install"
+    }
+}
+
 Write-Step "[1/7] 校验项目目录..."
 if (-not (Test-Path "$RootDir/backend/pyproject.toml")) {
     Fail-AndExit "[错误] 未找到 backend/pyproject.toml，请确认脚本位于项目根目录。"
@@ -81,14 +117,10 @@ if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
 }
 
 Write-Step "[4/7] 校验后端运行环境..."
-if (-not (Test-Path "$RootDir/backend/.venv")) {
-    Fail-AndExit "[错误] 未检测到 backend/.venv。请先执行：cd `"$RootDir/backend`" ; uv sync"
-}
+Ensure-BackendEnv
 
 Write-Step "[5/7] 校验前端运行环境..."
-if (-not (Test-Path "$RootDir/frontend/node_modules")) {
-    Fail-AndExit "[错误] 未检测到 frontend/node_modules。请先执行：cd `"$RootDir/frontend`" ; npm install"
-}
+Ensure-FrontendEnv
 
 Write-Step "[6/7] 校验后端工具链..."
 try {

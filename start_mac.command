@@ -51,6 +51,42 @@ install_uv_if_possible() {
   echo "[提示] uv 已自动安装完成。"
 }
 
+ensure_backend_env() {
+  if [[ -d "$ROOT_DIR/backend/.venv" ]]; then
+    return 0
+  fi
+
+  read -r -p "[询问] 未检测到 backend/.venv。是否现在自动执行 uv sync 初始化后端环境？请输入 Y 或 N: " backend_choice
+  if [[ "$backend_choice" != "Y" && "$backend_choice" != "y" ]]; then
+    echo "[ERROR] 你已取消初始化后端环境。请执行: cd \"$ROOT_DIR/backend\" && uv sync"
+    exit 1
+  fi
+
+  echo "[提示] 正在初始化后端环境，请稍候..."
+  (cd "$ROOT_DIR/backend" && uv sync) || {
+    echo "[ERROR] 后端环境初始化失败。请执行: cd \"$ROOT_DIR/backend\" && uv sync"
+    exit 1
+  }
+}
+
+ensure_frontend_env() {
+  if [[ -d "$ROOT_DIR/frontend/node_modules" ]]; then
+    return 0
+  fi
+
+  read -r -p "[询问] 未检测到 frontend/node_modules。是否现在自动执行 npm install 初始化前端环境？请输入 Y 或 N: " frontend_choice
+  if [[ "$frontend_choice" != "Y" && "$frontend_choice" != "y" ]]; then
+    echo "[ERROR] 你已取消初始化前端环境。请执行: cd \"$ROOT_DIR/frontend\" && npm install"
+    exit 1
+  fi
+
+  echo "[提示] 正在初始化前端环境，请稍候..."
+  (cd "$ROOT_DIR/frontend" && npm install) || {
+    echo "[ERROR] 前端环境初始化失败。请执行: cd \"$ROOT_DIR/frontend\" && npm install"
+    exit 1
+  }
+}
+
 echo "[1/6] 校验项目目录..."
 [[ -f "$ROOT_DIR/backend/pyproject.toml" ]] || { echo "[ERROR] 未找到 backend/pyproject.toml，请确认脚本位于项目根目录。"; exit 1; }
 [[ -f "$ROOT_DIR/frontend/package.json" ]] || { echo "[ERROR] 未找到 frontend/package.json，请确认脚本位于项目根目录。"; exit 1; }
@@ -65,10 +101,10 @@ command -v node >/dev/null 2>&1 || { echo "[ERROR] 未检测到 node。请先安
 command -v npm >/dev/null 2>&1 || { echo "[ERROR] 未检测到 npm。请确认 Node.js 安装完整。"; exit 1; }
 
 echo "[4/6] 校验后端运行环境..."
-[[ -d "$ROOT_DIR/backend/.venv" ]] || { echo "[ERROR] 未检测到 backend/.venv，请先执行: cd \"$ROOT_DIR/backend\" && uv sync"; exit 1; }
+ensure_backend_env
 
 echo "[5/6] 校验前端运行环境..."
-[[ -d "$ROOT_DIR/frontend/node_modules" ]] || { echo "[ERROR] 未检测到 frontend/node_modules，请先执行: cd \"$ROOT_DIR/frontend\" && npm install"; exit 1; }
+ensure_frontend_env
 
 echo "[6/7] 校验后端工具链..."
 (cd "$ROOT_DIR/backend" && uv run python --version >/dev/null) || { echo "[ERROR] backend 环境存在，但无法执行 uv run python --version。请先执行: cd \"$ROOT_DIR/backend\" && uv sync"; exit 1; }
