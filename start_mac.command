@@ -177,22 +177,25 @@ echo "如果关闭终端，对应服务会停止。"
 echo "如需停止服务，直接关闭对应终端窗口即可。"
 echo "========================================"
 
+( sleep 3; open "http://127.0.0.1:5173" ) >/dev/null 2>&1 &
+
 if command -v osascript >/dev/null 2>&1; then
-  BACKEND_APPLE=$(printf '%s' "bash \"$BACKEND_LAUNCHER\"" | sed 's/\\/\\\\/g; s/"/\\"/g')
   FRONTEND_APPLE=$(printf '%s' "bash \"$FRONTEND_LAUNCHER\"" | sed 's/\\/\\\\/g; s/"/\\"/g')
   osascript <<EOF
 tell application "Terminal"
     activate
-    do script "$BACKEND_APPLE"
     do script "$FRONTEND_APPLE"
 end tell
 EOF
+
+  exec bash "$BACKEND_LAUNCHER"
 else
-  nohup bash "$BACKEND_LAUNCHER" > "$RUNTIME_DIR/backend.log" 2>&1 &
   nohup bash "$FRONTEND_LAUNCHER" > "$RUNTIME_DIR/frontend.log" 2>&1 &
+  exec bash "$BACKEND_LAUNCHER"
 fi
 
 echo
 echo "启动命令已提交："
 echo "后端: http://127.0.0.1:8000/api/health"
 echo "前端: http://127.0.0.1:5173"
+echo "浏览器将在前端启动后自动打开首页。"

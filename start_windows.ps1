@@ -214,6 +214,13 @@ Start-Process powershell -ArgumentList @(
     "-Command", $frontendCmd
 )
 
+Start-Process powershell -ArgumentList @(
+    "-NoProfile",
+    "-ExecutionPolicy", "Bypass",
+    "-Command", "Start-Sleep -Seconds 3; Start-Process 'http://127.0.0.1:5173'"
+)
+
 Write-Host "已提交启动命令：" -ForegroundColor Green
 Write-Host "后端: http://127.0.0.1:8000/api/health"
 Write-Host "前端: http://127.0.0.1:5173"
+Write-Host "浏览器将在前端启动后自动打开首页。"
