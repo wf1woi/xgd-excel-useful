@@ -127,6 +127,8 @@ fi
 
 BACKEND_CMD="cd \"$ROOT_DIR/backend\" && uv run main.py"
 FRONTEND_CMD="cd \"$ROOT_DIR/frontend\" && npm run dev"
+BACKEND_BANNER="echo '========================================'; echo '后端服务窗口'; echo '这个窗口负责运行后端 API 服务。'; echo '系统使用期间请不要关闭该窗口。'; echo '如需停止后端，直接关闭此终端窗口即可。'; echo '健康检查地址: http://127.0.0.1:8000/api/health'; echo '========================================'; echo"
+FRONTEND_BANNER="echo '========================================'; echo '前端服务窗口'; echo '这个窗口负责运行前端页面服务。'; echo '系统使用期间请不要关闭该窗口。'; echo '如需停止前端，直接关闭此终端窗口即可。'; echo '访问地址: http://127.0.0.1:5173'; echo '========================================'; echo"
 
 echo
 echo "========================================"
@@ -141,8 +143,8 @@ echo "如需停止服务，直接关闭对应终端窗口即可。"
 echo "========================================"
 
 if command -v osascript >/dev/null 2>&1; then
-  BACKEND_APPLE=$(printf '%s' "printf '========================================\n后端服务窗口\n这个窗口负责运行后端 API 服务。\n系统使用期间请不要关闭该窗口。\n如需停止后端，直接关闭此终端窗口即可。\n健康检查地址: http://127.0.0.1:8000/api/health\n========================================\n\n'; $BACKEND_CMD" | sed 's/\\/\\\\/g; s/"/\\"/g')
-  FRONTEND_APPLE=$(printf '%s' "printf '========================================\n前端服务窗口\n这个窗口负责运行前端页面服务。\n系统使用期间请不要关闭该窗口。\n如需停止前端，直接关闭此终端窗口即可。\n访问地址: http://127.0.0.1:5173\n========================================\n\n'; $FRONTEND_CMD" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  BACKEND_APPLE=$(printf '%s' "$BACKEND_BANNER; $BACKEND_CMD" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  FRONTEND_APPLE=$(printf '%s' "$FRONTEND_BANNER; $FRONTEND_CMD" | sed 's/\\/\\\\/g; s/"/\\"/g')
   osascript <<EOF
 tell application "Terminal"
     activate
@@ -152,8 +154,8 @@ end tell
 EOF
 else
   mkdir -p "$ROOT_DIR/runtime"
-  nohup bash -lc "printf '========================================\n后端服务窗口\n这个窗口负责运行后端 API 服务。\n系统使用期间请不要关闭该窗口。\n如需停止后端，直接关闭此终端窗口即可。\n健康检查地址: http://127.0.0.1:8000/api/health\n========================================\n\n'; $BACKEND_CMD" > "$ROOT_DIR/runtime/backend.log" 2>&1 &
-  nohup bash -lc "printf '========================================\n前端服务窗口\n这个窗口负责运行前端页面服务。\n系统使用期间请不要关闭该窗口。\n如需停止前端，直接关闭此终端窗口即可。\n访问地址: http://127.0.0.1:5173\n========================================\n\n'; $FRONTEND_CMD" > "$ROOT_DIR/runtime/frontend.log" 2>&1 &
+  nohup bash -lc "$BACKEND_BANNER; $BACKEND_CMD" > "$ROOT_DIR/runtime/backend.log" 2>&1 &
+  nohup bash -lc "$FRONTEND_BANNER; $FRONTEND_CMD" > "$ROOT_DIR/runtime/frontend.log" 2>&1 &
 fi
 
 echo
