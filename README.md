@@ -251,7 +251,7 @@ README.md
 - 若系统已安装 Python 但未安装 `uv`，启动脚本会先询问用户，再决定是否使用 `uv` 官方安装脚本自动安装
 - 校验 `backend/.venv` 与 `frontend/node_modules` 是否存在
 - 若缺少 `backend/.venv` 或 `frontend/node_modules`，启动脚本会先询问用户，再决定是否自动执行 `uv sync` / `npm install`
-- 实际执行 `uv run python --version` 与 `npm exec vite -- --version` 验证环境可用
+- Windows/macOS 会优先直接校验本地虚拟环境中的 Python 和前端本地 `vite` 可执行文件，减少 `uv` cache 权限问题导致的误失败
 - 校验通过后同时启动前后端开发服务
 - 启动时会明确提示“前端服务窗口”和“后端服务窗口”的用途，并提醒用户运行期间不要关闭终端
 - 启动后会自动打开浏览器并访问前端地址 `http://127.0.0.1:5173`

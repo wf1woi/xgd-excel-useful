@@ -1,4 +1,4 @@
-[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+﻿[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 $OutputEncoding = [Console]::OutputEncoding
 
 $RootDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -95,6 +95,22 @@ function Ensure-FrontendEnv {
     }
 }
 
+function Get-BackendPythonPath {
+    $pythonPath = Join-Path $RootDir "backend/.venv/Scripts/python.exe"
+    if (-not (Test-Path $pythonPath)) {
+        Fail-AndExit "[错误] 已检测到 backend/.venv，但缺少 $pythonPath。请重新执行：cd `"$RootDir/backend`" ; uv sync"
+    }
+    return $pythonPath
+}
+
+function Get-FrontendVitePath {
+    $vitePath = Join-Path $RootDir "frontend/node_modules/.bin/vite.cmd"
+    if (-not (Test-Path $vitePath)) {
+        Fail-AndExit "[错误] 已检测到 frontend/node_modules，但缺少 vite.cmd。请重新执行：cd `"$RootDir/frontend`" ; npm install"
+    }
+    return $vitePath
+}
+
 Write-Step "[1/7] 校验项目目录..."
 if (-not (Test-Path "$RootDir/backend/pyproject.toml")) {
     Fail-AndExit "[错误] 未找到 backend/pyproject.toml，请确认脚本位于项目根目录。"
@@ -124,16 +140,18 @@ Ensure-FrontendEnv
 
 Write-Step "[6/7] 校验后端工具链..."
 try {
-    $pythonVersion = (& uv run --directory "$RootDir/backend" python --version).Trim()
+    $backendPython = Get-BackendPythonPath
+    $pythonVersion = (& $backendPython --version).Trim()
 } catch {
-    Fail-AndExit "[错误] backend 环境存在，但无法执行 uv run python --version。请先执行：cd `"$RootDir/backend`" ; uv sync"
+    Fail-AndExit "[错误] backend 环境存在，但无法执行 .venv 中的 python。请先执行：cd `"$RootDir/backend`" ; uv sync"
 }
 
 Write-Step "[7/7] 校验前端工具链..."
 try {
-    $viteVersion = (& npm exec --prefix "$RootDir/frontend" vite -- --version | Select-Object -First 1).Trim()
+    $frontendVite = Get-FrontendVitePath
+    $viteVersion = (& $frontendVite --version | Select-Object -First 1).Trim()
 } catch {
-    Fail-AndExit "[错误] frontend 环境存在，但无法执行 npm exec vite -- --version。请先执行：cd `"$RootDir/frontend`" ; npm install"
+    Fail-AndExit "[错误] frontend 环境存在，但无法执行 node_modules 中的 vite。请先执行：cd `"$RootDir/frontend`" ; npm install"
 }
 
 $uvVersion = (& uv --version).Trim()

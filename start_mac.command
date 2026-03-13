@@ -87,6 +87,14 @@ ensure_frontend_env() {
   }
 }
 
+backend_python_path() {
+  echo "$ROOT_DIR/backend/.venv/bin/python"
+}
+
+frontend_vite_path() {
+  echo "$ROOT_DIR/frontend/node_modules/.bin/vite"
+}
+
 echo "[1/6] 校验项目目录..."
 [[ -f "$ROOT_DIR/backend/pyproject.toml" ]] || { echo "[ERROR] 未找到 backend/pyproject.toml，请确认脚本位于项目根目录。"; exit 1; }
 [[ -f "$ROOT_DIR/frontend/package.json" ]] || { echo "[ERROR] 未找到 frontend/package.json，请确认脚本位于项目根目录。"; exit 1; }
@@ -107,16 +115,18 @@ echo "[5/6] 校验前端运行环境..."
 ensure_frontend_env
 
 echo "[6/7] 校验后端工具链..."
-(cd "$ROOT_DIR/backend" && uv run python --version >/dev/null) || { echo "[ERROR] backend 环境存在，但无法执行 uv run python --version。请先执行: cd \"$ROOT_DIR/backend\" && uv sync"; exit 1; }
+[[ -x "$(backend_python_path)" ]] || { echo "[ERROR] 已检测到 backend/.venv，但缺少 .venv/bin/python。请先执行: cd \"$ROOT_DIR/backend\" && uv sync"; exit 1; }
+"$(backend_python_path)" --version >/dev/null || { echo "[ERROR] backend 环境存在，但无法执行 .venv/bin/python。请先执行: cd \"$ROOT_DIR/backend\" && uv sync"; exit 1; }
 
 echo "[7/7] 校验前端工具链..."
-(cd "$ROOT_DIR/frontend" && npm exec vite -- --version >/dev/null) || { echo "[ERROR] frontend 环境存在，但无法执行 npm exec vite -- --version。请先执行: cd \"$ROOT_DIR/frontend\" && npm install"; exit 1; }
+[[ -x "$(frontend_vite_path)" ]] || { echo "[ERROR] 已检测到 frontend/node_modules，但缺少 node_modules/.bin/vite。请先执行: cd \"$ROOT_DIR/frontend\" && npm install"; exit 1; }
+"$(frontend_vite_path)" --version >/dev/null || { echo "[ERROR] frontend 环境存在，但无法执行 node_modules/.bin/vite。请先执行: cd \"$ROOT_DIR/frontend\" && npm install"; exit 1; }
 
 echo "uv: $(uv --version)"
-echo "python: $(cd "$ROOT_DIR/backend" && uv run python --version)"
+echo "python: $($(backend_python_path) --version)"
 echo "node: $(node --version)"
 echo "npm: $(npm --version)"
-echo "vite: $(cd "$ROOT_DIR/frontend" && npm exec vite -- --version | head -n 1)"
+echo "vite: $($(frontend_vite_path) --version | head -n 1)"
 
 if [[ "$CHECK_ONLY" == "--check-only" ]]; then
   echo
