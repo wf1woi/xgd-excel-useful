@@ -142,8 +142,8 @@ mkdir -p "$RUNTIME_DIR"
 BACKEND_HEALTH_URL="http://127.0.0.1:8000/api/health"
 FRONTEND_URL="http://localhost:5173"
 
-BACKEND_LAUNCHER="$RUNTIME_DIR/start_backend_mac.sh"
-FRONTEND_LAUNCHER="$RUNTIME_DIR/start_frontend_mac.sh"
+BACKEND_LAUNCHER="$RUNTIME_DIR/start_backend_mac.command"
+FRONTEND_LAUNCHER="$RUNTIME_DIR/start_frontend_mac.command"
 OPEN_BROWSER_LAUNCHER="$RUNTIME_DIR/open_frontend_when_ready_mac.sh"
 
 cat > "$BACKEND_LAUNCHER" <<EOF
@@ -185,13 +185,13 @@ frontend_url="$FRONTEND_URL"
 python_cmd="$(backend_python_path)"
 
 url_ready() {
-  local url="$1"
+  local url="\$1"
   if command -v curl >/dev/null 2>&1; then
-    curl --silent --fail --max-time 2 "$url" >/dev/null
-    return $?
+    curl --silent --fail --max-time 2 "\$url" >/dev/null
+    return \$?
   fi
 
-  "$python_cmd" - "$url" <<'PY'
+  "\$python_cmd" - "\$url" <<'PY'
 import sys
 import urllib.request
 
@@ -204,28 +204,28 @@ PY
 }
 
 wait_for_url() {
-  local name="$1"
-  local url="$2"
-  local max_attempts="$3"
-  local delay_seconds="$4"
+  local name="\$1"
+  local url="\$2"
+  local max_attempts="\$3"
+  local delay_seconds="\$4"
   local attempt=1
 
   while (( attempt <= max_attempts )); do
-    if url_ready "$url"; then
-      echo "[提示] $name 已就绪: $url"
+    if url_ready "\$url"; then
+      echo "[提示] \$name 已就绪: \$url"
       return 0
     fi
-    sleep "$delay_seconds"
+    sleep "\$delay_seconds"
     ((attempt++))
   done
 
-  echo "[警告] 等待 $name 超时，仍将尝试打开浏览器。"
+  echo "[警告] 等待 \$name 超时，仍将尝试打开浏览器。"
   return 1
 }
 
-wait_for_url "后端服务" "$backend_url" 60 1 || true
-wait_for_url "前端页面" "$frontend_url" 60 1 || true
-open "$frontend_url" >/dev/null 2>&1 || true
+wait_for_url "后端服务" "\$backend_url" 60 1 || true
+wait_for_url "前端页面" "\$frontend_url" 60 1 || true
+open "\$frontend_url" >/dev/null 2>&1 || true
 EOF
 
 chmod +x "$BACKEND_LAUNCHER" "$FRONTEND_LAUNCHER" "$OPEN_BROWSER_LAUNCHER"
@@ -244,15 +244,8 @@ echo "========================================"
 
 bash "$OPEN_BROWSER_LAUNCHER" >/dev/null 2>&1 &
 
-if command -v osascript >/dev/null 2>&1; then
-  FRONTEND_APPLE=$(printf '%s' "bash \"$FRONTEND_LAUNCHER\"" | sed 's/\\/\\\\/g; s/"/\\"/g')
-  osascript <<EOF
-tell application "Terminal"
-    activate
-    do script "$FRONTEND_APPLE"
-end tell
-EOF
-
+if command -v open >/dev/null 2>&1; then
+  open -a Terminal "$FRONTEND_LAUNCHER"
   exec bash "$BACKEND_LAUNCHER"
 else
   nohup bash "$FRONTEND_LAUNCHER" > "$RUNTIME_DIR/frontend.log" 2>&1 &
