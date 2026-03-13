@@ -139,9 +139,12 @@ BACKEND_CMD="cd \"$ROOT_DIR/backend\" && uv run main.py"
 FRONTEND_CMD="cd \"$ROOT_DIR/frontend\" && npm run dev"
 RUNTIME_DIR="$ROOT_DIR/runtime"
 mkdir -p "$RUNTIME_DIR"
+BACKEND_HEALTH_URL="http://127.0.0.1:8000/api/health"
+FRONTEND_URL="http://localhost:5173"
 
 BACKEND_LAUNCHER="$RUNTIME_DIR/start_backend_mac.sh"
 FRONTEND_LAUNCHER="$RUNTIME_DIR/start_frontend_mac.sh"
+OPEN_BROWSER_LAUNCHER="$RUNTIME_DIR/open_frontend_when_ready_mac.sh"
 
 cat > "$BACKEND_LAUNCHER" <<EOF
 #!/bin/bash
@@ -151,7 +154,7 @@ echo "后端服务窗口"
 echo "这个窗口负责运行后端 API 服务。"
 echo "系统使用期间请不要关闭该窗口。"
 echo "如需停止后端，直接关闭此终端窗口即可。"
-echo "健康检查地址: http://127.0.0.1:8000/api/health"
+echo "健康检查地址: $BACKEND_HEALTH_URL"
 echo "========================================"
 echo
 cd "$ROOT_DIR/backend"
@@ -166,14 +169,66 @@ echo "前端服务窗口"
 echo "这个窗口负责运行前端页面服务。"
 echo "系统使用期间请不要关闭该窗口。"
 echo "如需停止前端，直接关闭此终端窗口即可。"
-echo "访问地址: http://127.0.0.1:5173"
+echo "访问地址: $FRONTEND_URL"
 echo "========================================"
 echo
 cd "$ROOT_DIR/frontend"
 npm run dev
 EOF
 
-chmod +x "$BACKEND_LAUNCHER" "$FRONTEND_LAUNCHER"
+cat > "$OPEN_BROWSER_LAUNCHER" <<EOF
+#!/bin/bash
+set -euo pipefail
+
+backend_url="$BACKEND_HEALTH_URL"
+frontend_url="$FRONTEND_URL"
+python_cmd="$(backend_python_path)"
+
+url_ready() {
+  local url="$1"
+  if command -v curl >/dev/null 2>&1; then
+    curl --silent --fail --max-time 2 "$url" >/dev/null
+    return $?
+  fi
+
+  "$python_cmd" - "$url" <<'PY'
+import sys
+import urllib.request
+
+try:
+    with urllib.request.urlopen(sys.argv[1], timeout=2):
+        pass
+except Exception:
+    raise SystemExit(1)
+PY
+}
+
+wait_for_url() {
+  local name="$1"
+  local url="$2"
+  local max_attempts="$3"
+  local delay_seconds="$4"
+  local attempt=1
+
+  while (( attempt <= max_attempts )); do
+    if url_ready "$url"; then
+      echo "[提示] $name 已就绪: $url"
+      return 0
+    fi
+    sleep "$delay_seconds"
+    ((attempt++))
+  done
+
+  echo "[警告] 等待 $name 超时，仍将尝试打开浏览器。"
+  return 1
+}
+
+wait_for_url "后端服务" "$backend_url" 60 1 || true
+wait_for_url "前端页面" "$frontend_url" 60 1 || true
+open "$frontend_url" >/dev/null 2>&1 || true
+EOF
+
+chmod +x "$BACKEND_LAUNCHER" "$FRONTEND_LAUNCHER" "$OPEN_BROWSER_LAUNCHER"
 
 echo
 echo "========================================"
@@ -187,7 +242,7 @@ echo "如果关闭终端，对应服务会停止。"
 echo "如需停止服务，直接关闭对应终端窗口即可。"
 echo "========================================"
 
-( sleep 3; open "http://127.0.0.1:5173" ) >/dev/null 2>&1 &
+bash "$OPEN_BROWSER_LAUNCHER" >/dev/null 2>&1 &
 
 if command -v osascript >/dev/null 2>&1; then
   FRONTEND_APPLE=$(printf '%s' "bash \"$FRONTEND_LAUNCHER\"" | sed 's/\\/\\\\/g; s/"/\\"/g')
@@ -206,6 +261,6 @@ fi
 
 echo
 echo "启动命令已提交："
-echo "后端: http://127.0.0.1:8000/api/health"
-echo "前端: http://127.0.0.1:5173"
-echo "浏览器将在前端启动后自动打开首页。"
+echo "后端: $BACKEND_HEALTH_URL"
+echo "前端: $FRONTEND_URL"
+echo "浏览器将在前后端就绪后自动打开首页。"

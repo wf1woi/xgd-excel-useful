@@ -3,6 +3,8 @@ $OutputEncoding = [Console]::OutputEncoding
 
 $RootDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $CheckOnly = $false
+$BackendHealthUrl = "http://127.0.0.1:8000/api/health"
+$FrontendUrl = "http://localhost:5173"
 if ($args -contains "--check-only") {
     $CheckOnly = $true
 }
@@ -111,6 +113,37 @@ function Get-FrontendVitePath {
     return $vitePath
 }
 
+function Test-UrlReady {
+    param([string]$Url)
+
+    try {
+        Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 2 | Out-Null
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Wait-UrlReady {
+    param(
+        [string]$Name,
+        [string]$Url,
+        [int]$MaxAttempts = 60,
+        [int]$DelaySeconds = 1
+    )
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        if (Test-UrlReady -Url $Url) {
+            Write-Host "[提示] $Name 已就绪: $Url" -ForegroundColor Green
+            return $true
+        }
+        Start-Sleep -Seconds $DelaySeconds
+    }
+
+    Write-Host "[警告] 等待 $Name 超时，仍将尝试打开浏览器。" -ForegroundColor Yellow
+    return $false
+}
+
 Write-Step "[1/7] 校验项目目录..."
 if (-not (Test-Path "$RootDir/backend/pyproject.toml")) {
     Fail-AndExit "[错误] 未找到 backend/pyproject.toml，请确认脚本位于项目根目录。"
@@ -183,7 +216,7 @@ Write-Host '后端服务窗口' -ForegroundColor Yellow
 Write-Host '这个窗口负责运行后端 API 服务。'
 Write-Host '系统使用期间请不要关闭该窗口。'
 Write-Host '如需停止后端，直接关闭此终端窗口即可。'
-Write-Host '健康检查地址: http://127.0.0.1:8000/api/health'
+Write-Host '健康检查地址: $BackendHealthUrl'
 Write-Host '========================================' -ForegroundColor Yellow
 Write-Host ''
 uv run main.py
@@ -199,10 +232,52 @@ Write-Host '前端服务窗口' -ForegroundColor Yellow
 Write-Host '这个窗口负责运行前端页面服务。'
 Write-Host '系统使用期间请不要关闭该窗口。'
 Write-Host '如需停止前端，直接关闭此终端窗口即可。'
-Write-Host '访问地址: http://127.0.0.1:5173'
+Write-Host '访问地址: $FrontendUrl'
 Write-Host '========================================' -ForegroundColor Yellow
 Write-Host ''
 npm run dev
+"@
+
+$openBrowserCmd = @"
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding(`$false)
+`$OutputEncoding = [Console]::OutputEncoding
+`$backendHealthUrl = '$BackendHealthUrl'
+`$frontendUrl = '$FrontendUrl'
+
+function Test-UrlReady {
+    param([string]`$Url)
+
+    try {
+        Invoke-WebRequest -Uri `$Url -UseBasicParsing -TimeoutSec 2 | Out-Null
+        return `$true
+    } catch {
+        return `$false
+    }
+}
+
+function Wait-UrlReady {
+    param(
+        [string]`$Name,
+        [string]`$Url,
+        [int]`$MaxAttempts = 60,
+        [int]`$DelaySeconds = 1
+    )
+
+    for (`$attempt = 1; `$attempt -le `$MaxAttempts; `$attempt++) {
+        if (Test-UrlReady -Url `$Url) {
+            Write-Host "[提示] `$Name 已就绪: `$Url" -ForegroundColor Green
+            return `$true
+        }
+        Start-Sleep -Seconds `$DelaySeconds
+    }
+
+    Write-Host "[警告] 等待 `$Name 超时，仍将尝试打开浏览器。" -ForegroundColor Yellow
+    return `$false
+}
+
+Wait-UrlReady -Name '后端服务' -Url `$backendHealthUrl | Out-Null
+Wait-UrlReady -Name '前端页面' -Url `$frontendUrl | Out-Null
+Start-Process `$frontendUrl
 "@
 
 Write-Host ""
@@ -235,10 +310,10 @@ Start-Process powershell -ArgumentList @(
 Start-Process powershell -ArgumentList @(
     "-NoProfile",
     "-ExecutionPolicy", "Bypass",
-    "-Command", "Start-Sleep -Seconds 3; Start-Process 'http://127.0.0.1:5173'"
+    "-Command", $openBrowserCmd
 )
 
 Write-Host "已提交启动命令：" -ForegroundColor Green
-Write-Host "后端: http://127.0.0.1:8000/api/health"
-Write-Host "前端: http://127.0.0.1:5173"
-Write-Host "浏览器将在前端启动后自动打开首页。"
+Write-Host "后端: $BackendHealthUrl"
+Write-Host "前端: $FrontendUrl"
+Write-Host "浏览器将在前后端就绪后自动打开首页。"
