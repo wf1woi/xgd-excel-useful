@@ -5,6 +5,7 @@ CHECK_ONLY="${1:-}"
 WORK_DIR="$(mktemp -d "/tmp/xgd-install.XXXXXX")"
 CURRENT_STAGE="Initialization"
 OFFLINE_INSTALLER_URL=""
+CURRENT_TTY="$(tty 2>/dev/null || true)"
 
 cleanup() {
   rm -rf "$WORK_DIR"
@@ -129,6 +130,44 @@ show_countdown() {
     echo "Window closes in ${remaining} second(s)..."
     sleep 1
   done
+}
+
+close_terminal_tab_for_tty() {
+  local target_tty="${1:-}"
+  if [[ -z "$target_tty" || "$target_tty" == "not a tty" ]]; then
+    return 0
+  fi
+
+  /usr/bin/osascript - "$target_tty" >/dev/null <<'EOF'
+on run argv
+  set targetTty to item 1 of argv
+  tell application "Terminal"
+    repeat with w in windows
+      repeat with t in tabs of w
+        try
+          if tty of t is targetTty then
+            if (count of tabs of w) is 1 then
+              close w saving no
+            else
+              close t saving no
+            end if
+            return
+          end if
+        end try
+      end repeat
+    end repeat
+  end tell
+end run
+EOF
+}
+
+close_terminal_tab_for_tty_async() {
+  local target_tty="${1:-}"
+  local delay_seconds="${2:-1}"
+  (
+    sleep "$delay_seconds"
+    close_terminal_tab_for_tty "$target_tty"
+  ) >/dev/null 2>&1 &
 }
 
 wait_for_install_result() {
@@ -357,10 +396,36 @@ show_countdown() {
 
 show_countdown 5
 rm -f -- "$0"
+/usr/bin/osascript - "$(tty 2>/dev/null || true)" >/dev/null 2>&1 <<'APPLESCRIPT' &
+on run argv
+  set targetTty to item 1 of argv
+  if targetTty is "" or targetTty is "not a tty" then
+    return
+  end if
+
+  tell application "Terminal"
+    repeat with w in windows
+      repeat with t in tabs of w
+        try
+          if tty of t is targetTty then
+            if (count of tabs of w) is 1 then
+              close w saving no
+            else
+              close t saving no
+            end if
+            return
+          end if
+        end try
+      end repeat
+    end repeat
+  end tell
+end run
+APPLESCRIPT
+sleep 1
 EOF
 
   chmod +x "$validate_script"
-  osascript <<EOF
+  /usr/bin/osascript >/dev/null <<EOF
 tell application "Terminal"
   activate
   do script "bash \"$validate_script\""
@@ -434,3 +499,4 @@ echo
 write_step "[VALIDATE] Open a new terminal and check PATH..."
 open_validation_terminal
 write_success "[DONE] Installation flow finished. Please review the new terminal window."
+close_terminal_tab_for_tty_async "$CURRENT_TTY" 1
