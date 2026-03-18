@@ -81,6 +81,24 @@ get_tool_version() {
   "$command_name" --version 2>/dev/null | head -n 1
 }
 
+is_usable_command() {
+  local command_name="$1"
+  local version_output
+  if ! version_output="$("$command_name" --version 2>/dev/null | head -n 1)"; then
+    return 1
+  fi
+  [[ -n "$version_output" ]]
+}
+
+is_usable_file() {
+  local file_path="$1"
+  local version_output
+  if ! version_output="$("$file_path" --version 2>/dev/null | head -n 1)"; then
+    return 1
+  fi
+  [[ -n "$version_output" ]]
+}
+
 get_tool_status() {
   local name="$1"
   shift
@@ -104,19 +122,20 @@ get_tool_status() {
 
   local command_name
   if command_name="$(get_installed_command "${commands[@]}")"; then
-    printf 'installed|path_ok|%s|%s\n' "$command_name" "$(get_tool_version "$command_name")"
-    return 0
+    if is_usable_command "$command_name"; then
+      printf 'installed|path_ok|%s|%s\n' "$command_name" "$(get_tool_version "$command_name")"
+      return 0
+    fi
   fi
 
   local executable_path
   if executable_path="$(find_existing_executable "${known_paths[@]}")"; then
-    local version
-    version="$(get_tool_version "$executable_path" || true)"
-    if [[ -z "$version" ]]; then
-      version="File found but version lookup failed"
+    local version=""
+    if is_usable_file "$executable_path"; then
+      version="$(get_tool_version "$executable_path" || true)"
+      printf 'installed|path_missing|%s|%s\n' "$executable_path" "$version"
+      return 0
     fi
-    printf 'installed|path_missing|%s|%s\n' "$executable_path" "$version"
-    return 0
   fi
 
   printf 'missing|||\n'
@@ -140,8 +159,10 @@ wait_for_install_result() {
   while (( attempt <= 12 )); do
     local command_name
     if command_name="$(get_installed_command "${commands[@]}")"; then
-      write_success "[DONE] $name installed: $(get_tool_version "$command_name")"
-      return 0
+      if is_usable_command "$command_name"; then
+        write_success "[DONE] $name installed: $(get_tool_version "$command_name")"
+        return 0
+      fi
     fi
     sleep 5
     attempt=$((attempt + 1))
@@ -149,6 +170,37 @@ wait_for_install_result() {
 
   write_warn "[WARN] $name is not visible in the current terminal yet. A new terminal check will run later."
   return 0
+}
+
+wait_for_manual_recheck() {
+  local name="$1"
+  shift
+  local commands=("$@")
+
+  while true; do
+    local command_name
+    if command_name="$(get_installed_command "${commands[@]}")"; then
+      if is_usable_command "$command_name"; then
+        write_success "[DONE] $name installed: $(get_tool_version "$command_name")"
+        return 0
+      fi
+    fi
+
+    write_warn "[ACTION] Complete the macOS installer window first."
+    write_warn "[ACTION] If no installer window appears, run 'softwareupdate --list' in another terminal."
+    read -r -p "After installation finishes, press Enter to re-check $name, or type S to stop: " user_choice
+    if [[ "$user_choice" == "S" || "$user_choice" == "s" ]]; then
+      return 1
+    fi
+  done
+}
+
+show_git_manual_steps() {
+  write_warn "[ACTION] Git on macOS is provided by Apple Command Line Tools."
+  write_warn "[ACTION] If no installer window appeared, run these commands manually in another terminal:"
+  write_warn "[ACTION]   xcode-select --install"
+  write_warn "[ACTION]   softwareupdate --list"
+  write_warn "[ACTION] Then verify with: git --version"
 }
 
 download_file() {
@@ -257,14 +309,19 @@ install_git() {
   write_warn "[INFO] A permission prompt or installer window may appear. Allow it and do not close this script window."
   write_step "[INSTALL] Git / Command Line Tools..."
 
-  if ! xcode-select --install 2>/dev/null; then
-    write_warn "[WARN] If macOS says Command Line Tools is already installed, continue with the next checks."
+  if ! xcode-select --install; then
+    write_warn "[WARN] If macOS says Command Line Tools is already installed or install was already requested, continue with the checks below."
   fi
 
   set_stage_context "Verify Git" "https://git-scm.com/book/en/v2/Getting-Started-Installing-Git"
-  write_warn "[INFO] Waiting for Git installation result. This may take a few minutes."
+  write_warn "[INFO] macOS installs Git through a system window. This script cannot finish that step for you."
+  write_warn "[INFO] Finish the Apple installer first, then return here for re-check."
+  show_git_manual_steps
   write_step "[VERIFY] Git..."
-  wait_for_install_result "Git" "git"
+  if ! wait_for_manual_recheck "Git" "git"; then
+    show_git_manual_steps
+    fail_and_exit "[ERROR] Git is still not available."
+  fi
 }
 
 install_python() {
@@ -355,9 +412,12 @@ test_tool() {
   local command_name
   for command_name in "$@"; do
     if command -v "$command_name" >/dev/null 2>&1; then
-      echo "[OK] $name: $("$command_name" --version 2>/dev/null | head -n 1)"
-      echo "     Path: $(command -v "$command_name")"
-      return 0
+      local version_output
+      if version_output="$("$command_name" --version 2>/dev/null | head -n 1)" && [[ -n "$version_output" ]]; then
+        echo "[OK] $name: $version_output"
+        echo "     Path: $(command -v "$command_name")"
+        return 0
+      fi
     fi
   done
 
