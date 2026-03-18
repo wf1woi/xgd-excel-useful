@@ -5,7 +5,6 @@ CHECK_ONLY="${1:-}"
 WORK_DIR="$(mktemp -d "/tmp/xgd-install.XXXXXX")"
 CURRENT_STAGE="Initialization"
 OFFLINE_INSTALLER_URL=""
-CURRENT_TTY="$(tty 2>/dev/null || true)"
 
 cleanup() {
   rm -rf "$WORK_DIR"
@@ -132,44 +131,6 @@ show_countdown() {
   done
 }
 
-close_terminal_tab_for_tty() {
-  local target_tty="${1:-}"
-  if [[ -z "$target_tty" || "$target_tty" == "not a tty" ]]; then
-    return 0
-  fi
-
-  /usr/bin/osascript - "$target_tty" >/dev/null <<'EOF'
-on run argv
-  set targetTty to item 1 of argv
-  tell application "Terminal"
-    repeat with w in windows
-      repeat with t in tabs of w
-        try
-          if tty of t is targetTty then
-            if (count of tabs of w) is 1 then
-              close w saving no
-            else
-              close t saving no
-            end if
-            return
-          end if
-        end try
-      end repeat
-    end repeat
-  end tell
-end run
-EOF
-}
-
-close_terminal_tab_for_tty_async() {
-  local target_tty="${1:-}"
-  local delay_seconds="${2:-1}"
-  (
-    sleep "$delay_seconds"
-    close_terminal_tab_for_tty "$target_tty"
-  ) >/dev/null 2>&1 &
-}
-
 wait_for_install_result() {
   local name="$1"
   shift
@@ -232,6 +193,23 @@ install_pkg() {
   sudo installer -pkg "$pkg_path" -target /
 }
 
+install_uv() {
+  set_stage_context "Install uv" "https://docs.astral.sh/uv/getting-started/installation/"
+  write_warn "[INFO] Installing uv using the official standalone installer."
+  write_warn "[INFO] A permission prompt or installer window may appear. Allow it and do not close this script window."
+  write_step "[INSTALL] uv..."
+
+  if ! curl -LsSf https://astral.sh/uv/install.sh | sh; then
+    fail_and_exit "[ERROR] uv installation failed."
+  fi
+
+  export PATH="$HOME/.local/bin:$PATH"
+  set_stage_context "Verify uv" "https://docs.astral.sh/uv/getting-started/installation/"
+  write_warn "[INFO] Waiting for uv installation result. This may take a few minutes."
+  write_step "[VERIFY] uv..."
+  wait_for_install_result "uv" "uv"
+}
+
 get_node_lts_version() {
   fetch_url "https://nodejs.org/dist/index.json" | perl -0ne '
     while (/"version":"(v[^"]+)".*?"lts":(false|"[^"]+")/sg) {
@@ -268,6 +246,8 @@ install_node() {
   write_warn "[INFO] Waiting for Node.js installation result. This may take a few minutes."
   write_step "[VERIFY] Node.js..."
   wait_for_install_result "Node.js" "node"
+  write_step "[VERIFY] npm..."
+  wait_for_install_result "npm" "npm"
 }
 
 install_git() {
@@ -387,8 +367,10 @@ test_tool() {
 
 echo "Running validation in a new terminal..."
 test_tool "Node.js" "node" || true
+test_tool "npm" "npm" || true
 test_tool "Git" "git" || true
 test_tool "Python" "python3" "python" || true
+test_tool "uv" "uv" || true
 echo
 echo "If all checks are OK here, PATH is working in a fresh terminal."
 show_countdown() {
@@ -439,22 +421,34 @@ end tell
 EOF
 }
 
-write_step "[1/3] Check Node.js..."
+write_step "[1/5] Check Node.js..."
 node_ok=0
 if ensure_tool_installed "Node.js" "install_node" "node" --paths "/usr/local/bin/node" "/opt/homebrew/bin/node"; then
   node_ok=1
 fi
 
-write_step "[2/3] Check Git..."
+write_step "[2/5] Check npm..."
+npm_ok=0
+if ensure_tool_installed "npm" "install_node" "npm" --paths "/usr/local/bin/npm" "/opt/homebrew/bin/npm"; then
+  npm_ok=1
+fi
+
+write_step "[3/5] Check Git..."
 git_ok=0
 if ensure_tool_installed "Git" "install_git" "git" --paths "/usr/bin/git" "/Library/Developer/CommandLineTools/usr/bin/git"; then
   git_ok=1
 fi
 
-write_step "[3/3] Check Python..."
+write_step "[4/5] Check Python..."
 python_ok=0
 if ensure_tool_installed "Python" "install_python" "python3" "python" --paths "/usr/local/bin/python3" "/opt/homebrew/bin/python3" "/Library/Frameworks/Python.framework/Versions/*/bin/python3"; then
   python_ok=1
+fi
+
+write_step "[5/5] Check uv..."
+uv_ok=0
+if ensure_tool_installed "uv" "install_uv" "uv" --paths "$HOME/.local/bin/uv"; then
+  uv_ok=1
 fi
 
 echo
@@ -466,6 +460,15 @@ elif [[ "$node_status" == "installed" ]]; then
   echo "- Node.js: installed, but PATH is not configured. Location: $node_executable"
 else
   echo "- Node.js: missing"
+fi
+
+IFS='|' read -r npm_status npm_path_state npm_executable npm_version <<< "$(get_tool_status "npm" "npm" --paths "/usr/local/bin/npm" "/opt/homebrew/bin/npm")"
+if [[ "$npm_status" == "installed" && "$npm_path_state" == "path_ok" ]]; then
+  echo "- npm: $npm_version"
+elif [[ "$npm_status" == "installed" ]]; then
+  echo "- npm: installed, but PATH is not configured. Location: $npm_executable"
+else
+  echo "- npm: missing"
 fi
 
 IFS='|' read -r git_status git_path_state git_executable git_version <<< "$(get_tool_status "Git" "git" --paths "/usr/bin/git" "/Library/Developer/CommandLineTools/usr/bin/git")"
@@ -486,12 +489,21 @@ else
   echo "- Python: missing"
 fi
 
+IFS='|' read -r uv_status uv_path_state uv_executable uv_version <<< "$(get_tool_status "uv" "uv" --paths "$HOME/.local/bin/uv")"
+if [[ "$uv_status" == "installed" && "$uv_path_state" == "path_ok" ]]; then
+  echo "- uv: $uv_version"
+elif [[ "$uv_status" == "installed" ]]; then
+  echo "- uv: installed, but PATH is not configured. Location: $uv_executable"
+else
+  echo "- uv: missing"
+fi
+
 if [[ "$CHECK_ONLY" == "--check-only" ]]; then
   exit 0
 fi
 
-if [[ $node_ok -ne 1 || $git_ok -ne 1 || $python_ok -ne 1 ]]; then
-  if [[ "$node_path_state" == "path_missing" || "$git_path_state" == "path_missing" || "$python_path_state" == "path_missing" ]]; then
+if [[ $node_ok -ne 1 || $npm_ok -ne 1 || $git_ok -ne 1 || $python_ok -ne 1 || $uv_ok -ne 1 ]]; then
+  if [[ "$node_path_state" == "path_missing" || "$npm_path_state" == "path_missing" || "$git_path_state" == "path_missing" || "$python_path_state" == "path_missing" || "$uv_path_state" == "path_missing" ]]; then
     write_warn "[RESULT] Some tools are installed, but PATH is not configured."
     write_warn "[RESULT] To avoid duplicate installs, the script stopped before final validation."
   else
@@ -505,4 +517,3 @@ echo
 write_step "[VALIDATE] Open a new terminal and check PATH..."
 open_validation_terminal
 write_success "[DONE] Installation flow finished. Please review the new terminal window."
-close_terminal_tab_for_tty_async "$CURRENT_TTY" 1

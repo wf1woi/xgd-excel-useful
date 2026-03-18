@@ -263,6 +263,29 @@ function Get-PythonLatestStableVersion {
     return $match.Groups[1].Value
 }
 
+function Install-Uv {
+    Set-StageContext -Stage "Install uv" -OfflineUrl "https://docs.astral.sh/uv/getting-started/installation/"
+    Write-Warn "[INFO] Installing uv using the official standalone installer."
+    Write-Warn "[INFO] A UAC prompt or installer window may appear. Allow it and do not close this script window."
+    Write-Step "[INSTALL] uv..."
+
+    try {
+        powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex" | Out-Null
+    } catch {
+        Fail-AndExit "[ERROR] uv installation failed."
+    }
+
+    $uvUserBin = Join-Path $HOME ".local\bin"
+    if (Test-Path $uvUserBin) {
+        $env:Path = "$uvUserBin;$env:Path"
+    }
+
+    Set-StageContext -Stage "Verify uv" -OfflineUrl "https://docs.astral.sh/uv/getting-started/installation/"
+    Write-Warn "[INFO] Waiting for uv installation result. This may take a few minutes."
+    Write-Step "[VERIFY] uv..."
+    return Wait-ForInstallResult -Name "uv" -Commands @("uv")
+}
+
 function Install-Node {
     $version = Get-NodeLatestLtsVersion
     $arch = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq [System.Runtime.InteropServices.Architecture]::Arm64) { "arm64" } else { "x64" }
@@ -286,7 +309,10 @@ function Install-Node {
     Set-StageContext -Stage "Verify Node.js" -OfflineUrl $url
     Write-Warn "[INFO] Waiting for Node.js installation result. This may take a few minutes."
     Write-Step "[VERIFY] Node.js..."
-    return Wait-ForInstallResult -Name "Node.js" -Commands @("node")
+    $nodeReady = Wait-ForInstallResult -Name "Node.js" -Commands @("node")
+    Write-Step "[VERIFY] npm..."
+    $npmReady = Wait-ForInstallResult -Name "npm" -Commands @("npm")
+    return ($nodeReady -and $npmReady)
 }
 
 function Install-Git {
@@ -443,8 +469,10 @@ function Show-Countdown {
 
 Write-Host "Running validation in a new terminal..." -ForegroundColor Cyan
 Test-Tool -Name "Node.js" -Commands @("node")
+Test-Tool -Name "npm" -Commands @("npm")
 Test-Tool -Name "Git" -Commands @("git")
 Test-Tool -Name "Python" -Commands @("python", "py")
+Test-Tool -Name "uv" -Commands @("uv")
 Write-Host ""
 Write-Host "If all checks are OK here, PATH is working in a fresh terminal." -ForegroundColor Yellow
 Show-Countdown -Seconds 5
@@ -455,13 +483,21 @@ Remove-Item -Path $PSCommandPath -Force -ErrorAction SilentlyContinue
     Start-Process powershell -ArgumentList @("-ExecutionPolicy", "Bypass", "-File", $validateScript) | Out-Null
 }
 
-Write-Step "[1/3] Check Node.js..."
+Write-Step "[1/5] Check Node.js..."
 $nodeOk = Ensure-ToolInstalled -Name "Node.js" -Commands @("node") -KnownPaths @(
     "C:/Program Files/nodejs/node.exe",
     "C:/Program Files (x86)/nodejs/node.exe"
 ) -Installer ${function:Install-Node}
 
-Write-Step "[2/3] Check Git..."
+Write-Step "[2/5] Check npm..."
+$npmOk = Ensure-ToolInstalled -Name "npm" -Commands @("npm") -KnownPaths @(
+    "C:/Program Files/nodejs/npm.cmd",
+    "C:/Program Files/nodejs/npm",
+    "C:/Program Files (x86)/nodejs/npm.cmd",
+    "C:/Program Files (x86)/nodejs/npm"
+) -Installer ${function:Install-Node}
+
+Write-Step "[3/5] Check Git..."
 $gitOk = Ensure-ToolInstalled -Name "Git" -Commands @("git") -KnownPaths @(
     "C:/Program Files/Git/cmd/git.exe",
     "C:/Program Files/Git/bin/git.exe",
@@ -469,17 +505,28 @@ $gitOk = Ensure-ToolInstalled -Name "Git" -Commands @("git") -KnownPaths @(
     "C:/Program Files (x86)/Git/bin/git.exe"
 ) -Installer ${function:Install-Git}
 
-Write-Step "[3/3] Check Python..."
+Write-Step "[4/5] Check Python..."
 $pythonOk = Ensure-ToolInstalled -Name "Python" -Commands @("python", "py") -KnownPaths @(
     "$env:LOCALAPPDATA/Programs/Python/Python*/python.exe",
     "C:/Program Files/Python*/python.exe",
     "C:/Windows/py.exe"
 ) -Installer ${function:Install-Python}
 
+Write-Step "[5/5] Check uv..."
+$uvOk = Ensure-ToolInstalled -Name "uv" -Commands @("uv") -KnownPaths @(
+    "$env:USERPROFILE/.local/bin/uv.exe"
+) -Installer ${function:Install-Uv}
+
 $results = @(
     Get-ToolStatus -Name "Node.js" -Commands @("node") -KnownPaths @(
         "C:/Program Files/nodejs/node.exe",
         "C:/Program Files (x86)/nodejs/node.exe"
+    )
+    Get-ToolStatus -Name "npm" -Commands @("npm") -KnownPaths @(
+        "C:/Program Files/nodejs/npm.cmd",
+        "C:/Program Files/nodejs/npm",
+        "C:/Program Files (x86)/nodejs/npm.cmd",
+        "C:/Program Files (x86)/nodejs/npm"
     )
     Get-ToolStatus -Name "Git" -Commands @("git") -KnownPaths @(
         "C:/Program Files/Git/cmd/git.exe",
@@ -491,6 +538,9 @@ $results = @(
         "$env:LOCALAPPDATA/Programs/Python/Python*/python.exe",
         "C:/Program Files/Python*/python.exe",
         "C:/Windows/py.exe"
+    )
+    Get-ToolStatus -Name "uv" -Commands @("uv") -KnownPaths @(
+        "$env:USERPROFILE/.local/bin/uv.exe"
     )
 )
 
@@ -528,6 +578,7 @@ Write-Host ""
 Write-Step "[VALIDATE] Open a new terminal and check PATH..."
 Open-ValidationTerminal
 Write-Success "[DONE] Installation flow finished. Please review the new terminal window."
+
 
 
 
