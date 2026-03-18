@@ -14,29 +14,29 @@ cleanup() {
 trap cleanup EXIT
 
 write_step() {
-  echo "$1"
+  echo "$1" >&2
 }
 
 write_warn() {
-  echo "$1"
+  echo "$1" >&2
 }
 
 write_success() {
-  echo "$1"
+  echo "$1" >&2
 }
 
 write_info() {
-  echo "$1"
+  echo "$1" >&2
 }
 
 fail_and_exit() {
   local message="$1"
-  echo "$message"
-  echo "[RESULT] Failed stage: ${CURRENT_STAGE}"
+  echo "$message" >&2
+  echo "[RESULT] Failed stage: ${CURRENT_STAGE}" >&2
   if [[ -n "$OFFLINE_INSTALLER_URL" ]]; then
-    echo "[RESULT] Official offline installer: ${OFFLINE_INSTALLER_URL}"
+    echo "[RESULT] Official offline installer: ${OFFLINE_INSTALLER_URL}" >&2
   fi
-  echo "[RESULT] Fix the issue above, then run install_mac.command again."
+  echo "[RESULT] Fix the issue above, then run install_mac.command again." >&2
   exit 1
 }
 
@@ -233,23 +233,26 @@ install_pkg() {
 }
 
 get_node_lts_version() {
-  fetch_url "https://nodejs.org/dist/index.json" | /usr/bin/osascript -l JavaScript <<'EOF'
-const input = $.NSString.alloc.initWithDataEncoding(
-  $.NSFileHandle.fileHandleWithStandardInput.readDataToEndOfFile,
-  $.NSUTF8StringEncoding
-).js;
-const releases = JSON.parse(input);
-const lts = releases.find(item => item.lts);
-if (!lts) {
-  throw new Error("No LTS release found");
-}
-console.log(lts.version);
-EOF
+  fetch_url "https://nodejs.org/dist/index.json" | perl -0ne '
+    while (/"version":"(v[^"]+)".*?"lts":(false|"[^"]+")/sg) {
+      if ($2 ne "false") {
+        print $1;
+        exit 0;
+      }
+    }
+    exit 1;
+  '
 }
 
 install_node() {
   local version
-  version="$(get_node_lts_version)"
+  set_stage_context "Resolve Node.js version" "https://nodejs.org/dist/index.json"
+  if ! version="$(get_node_lts_version)"; then
+    fail_and_exit "[ERROR] Could not detect the latest Node.js LTS version."
+  fi
+  if [[ -z "$version" ]]; then
+    fail_and_exit "[ERROR] Could not detect the latest Node.js LTS version."
+  fi
   local pkg_path="$WORK_DIR/node-${version}.pkg"
   local url="https://nodejs.org/dist/${version}/node-${version}.pkg"
 
@@ -286,7 +289,10 @@ install_git() {
 
 install_python() {
   local version
-  version="$(fetch_url "https://www.python.org/downloads/macos/" | sed -n 's/.*Latest Python 3 Release - Python \([0-9.]*\).*/\1/p' | head -n 1)"
+  set_stage_context "Resolve Python version" "https://www.python.org/downloads/macos/"
+  if ! version="$(fetch_url "https://www.python.org/downloads/macos/" | sed -n 's/.*Latest Python 3 Release - Python \([0-9.]*\).*/\1/p' | head -n 1)"; then
+    fail_and_exit "[ERROR] Could not detect the latest stable Python 3 version."
+  fi
   if [[ -z "$version" ]]; then
     fail_and_exit "[ERROR] Could not detect the latest stable Python 3 version."
   fi
