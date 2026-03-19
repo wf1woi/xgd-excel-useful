@@ -7,6 +7,7 @@ $OutputEncoding = [Console]::OutputEncoding
 $Global:ProgressPreference = 'SilentlyContinue'
 $script:CurrentStage = "Initialization"
 $script:OfflineInstallerUrl = $null
+$script:InstallDirectorySelections = @{}
 
 function Write-Step {
     param([string]$Message)
@@ -70,6 +71,87 @@ function Refresh-Path {
     $env:Path = "$machinePath;$userPath"
 }
 
+function Compress-ConsecutivePathSegments {
+    param([string]$Path)
+
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    $root = [System.IO.Path]::GetPathRoot($fullPath)
+    $relativePart = $fullPath.Substring($root.Length)
+    if ([string]::IsNullOrWhiteSpace($relativePart)) {
+        return $fullPath
+    }
+
+    $segments = $relativePart -split '[\\/]+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    $compressedSegments = New-Object System.Collections.Generic.List[string]
+    foreach ($segment in $segments) {
+        if ($compressedSegments.Count -gt 0 -and $compressedSegments[$compressedSegments.Count - 1].Equals($segment, [System.StringComparison]::OrdinalIgnoreCase)) {
+            continue
+        }
+        $compressedSegments.Add($segment)
+    }
+
+    if ($compressedSegments.Count -eq 0) {
+        return $fullPath.TrimEnd('\')
+    }
+
+    return ($root.TrimEnd('\') + '\' + ($compressedSegments -join '\'))
+}
+
+function Test-DirectoryIsEmpty {
+    param([string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $true
+    }
+
+    return -not (Get-ChildItem -LiteralPath $Path -Force -ErrorAction SilentlyContinue | Select-Object -First 1)
+}
+
+function Get-InstallDirectoryChoice {
+    param(
+        [string]$ToolName,
+        [string]$DefaultPath
+    )
+
+    if ($script:InstallDirectorySelections.ContainsKey($ToolName)) {
+        return $script:InstallDirectorySelections[$ToolName]
+    }
+
+    while ($true) {
+        Write-Info ("[INFO] Default install directory for {0}: {1}" -f $ToolName, $DefaultPath)
+        $inputPath = Read-Host "Optional custom install directory for $ToolName. Press Enter to use the default path"
+        if ([string]::IsNullOrWhiteSpace($inputPath)) {
+            $script:InstallDirectorySelections[$ToolName] = $null
+            return $null
+        }
+
+        if (-not [System.IO.Path]::IsPathRooted($inputPath)) {
+            Write-Warn "[WARN] Please enter a full absolute path."
+            continue
+        }
+
+        try {
+            $normalizedPath = Compress-ConsecutivePathSegments -Path $inputPath
+        } catch {
+            Write-Warn "[WARN] The path is invalid. Please enter a valid Windows path."
+            continue
+        }
+
+        if ($normalizedPath -ne ([System.IO.Path]::GetFullPath($inputPath))) {
+            Write-Warn "[WARN] Repeated folder names were simplified."
+            Write-Info "[INFO] Normalized path: $normalizedPath"
+        }
+
+        if (-not (Test-DirectoryIsEmpty -Path $normalizedPath)) {
+            Write-Warn "[WARN] The selected directory is not empty. Choose an empty directory or press Enter for the default path."
+            continue
+        }
+
+        $script:InstallDirectorySelections[$ToolName] = $normalizedPath
+        return $normalizedPath
+    }
+}
+
 function Get-InstalledCommand {
     param([string[]]$Candidates)
 
@@ -80,6 +162,47 @@ function Get-InstalledCommand {
         }
     }
     return $null
+}
+
+function Test-IsWindowsStoreAlias {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return $false
+    }
+
+    return $Path -like "*\AppData\Local\Microsoft\WindowsApps\python*.exe"
+}
+
+function Get-CommandVersion {
+    param(
+        [string]$CommandName,
+        [string]$CommandPath = $null
+    )
+
+    if (Test-IsWindowsStoreAlias -Path $CommandPath) {
+        return $null
+    }
+
+    try {
+        $versionLine = (& $CommandName --version 2>&1 | Select-Object -First 1)
+        if ($null -eq $versionLine) {
+            return $null
+        }
+
+        $version = $versionLine.ToString().Trim()
+        if ([string]::IsNullOrWhiteSpace($version)) {
+            return $null
+        }
+
+        if ($version -match "Microsoft Store" -or $version -match "ms-windows-store") {
+            return $null
+        }
+
+        return $version
+    } catch {
+        return $null
+    }
 }
 
 function Find-ExistingExecutable {
@@ -132,10 +255,39 @@ function Get-ToolStatus {
         }
     }
 
-    try {
-        $version = (& $commandName --version | Select-Object -First 1).Trim()
-    } catch {
-        $version = "Command found but version lookup failed"
+    $command = Get-Command $commandName -ErrorAction SilentlyContinue | Select-Object -First 1
+    $commandPath = if ($command) { $command.Source } else { $commandName }
+    $version = Get-CommandVersion -CommandName $commandName -CommandPath $commandPath
+    if (-not $version) {
+        $executablePath = Find-ExistingExecutable -Patterns $KnownPaths
+        if ($executablePath) {
+            $knownPathVersion = "File found but version lookup failed"
+            try {
+                $knownPathVersionLine = (& $executablePath --version 2>&1 | Select-Object -First 1)
+                if ($null -ne $knownPathVersionLine) {
+                    $knownPathVersion = $knownPathVersionLine.ToString().Trim()
+                }
+            } catch {
+            }
+
+            return [PSCustomObject]@{
+                Name = $Name
+                Installed = $true
+                PathConfigured = $false
+                CommandName = $null
+                ExecutablePath = $executablePath
+                Version = $knownPathVersion
+            }
+        }
+
+        return [PSCustomObject]@{
+            Name = $Name
+            Installed = $false
+            PathConfigured = $false
+            CommandName = $null
+            ExecutablePath = $commandPath
+            Version = $null
+        }
     }
 
     return [PSCustomObject]@{
@@ -143,7 +295,7 @@ function Get-ToolStatus {
         Installed = $true
         PathConfigured = $true
         CommandName = $commandName
-        ExecutablePath = $commandName
+        ExecutablePath = $commandPath
         Version = $version
     }
 }
@@ -263,19 +415,70 @@ function Get-PythonLatestStableVersion {
     return $match.Groups[1].Value
 }
 
+function Get-GitLatestInstallerInfo {
+    try {
+        $release = Invoke-RestMethodWithRetry -Uri "https://api.github.com/repos/git-for-windows/git/releases/latest"
+    } catch {
+        Fail-AndExit "[ERROR] Could not read the latest Git for Windows release metadata."
+    }
+
+    $assetPattern = switch ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture) {
+        ([System.Runtime.InteropServices.Architecture]::Arm64) { '^Git-.*-arm64\.exe$' }
+        ([System.Runtime.InteropServices.Architecture]::X86) { '^Git-.*-32-bit\.exe$' }
+        default { '^Git-.*-64-bit\.exe$' }
+    }
+
+    $asset = $release.assets | Where-Object { $_.name -match $assetPattern } | Select-Object -First 1
+    if (-not $asset) {
+        Fail-AndExit "[ERROR] Could not detect the latest Git for Windows installer."
+    }
+
+    return [PSCustomObject]@{
+        Version = $release.tag_name
+        DownloadUrl = $asset.browser_download_url
+        ReleaseUrl = $release.html_url
+        FileName = $asset.name
+    }
+}
+
+function Find-PythonManagerExecutable {
+    Refresh-Path
+
+    $command = Get-Command "pymanager" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($command -and -not [string]::IsNullOrWhiteSpace($command.Source)) {
+        return $command.Source
+    }
+
+    $knownManagerPaths = @(
+        "$env:LOCALAPPDATA/Microsoft/WindowsApps/PythonSoftwareFoundation.PythonManager_*/pymanager.exe"
+    )
+
+    return Find-ExistingExecutable -Patterns $knownManagerPaths
+}
+
 function Install-Uv {
+    $defaultInstallDir = Join-Path $env:USERPROFILE ".local\bin"
+    $installDir = Get-InstallDirectoryChoice -ToolName "uv" -DefaultPath $defaultInstallDir
     Set-StageContext -Stage "Install uv" -OfflineUrl "https://docs.astral.sh/uv/getting-started/installation/"
     Write-Warn "[INFO] Installing uv using the official standalone installer."
     Write-Warn "[INFO] A UAC prompt or installer window may appear. Allow it and do not close this script window."
+    if ($installDir) {
+        Write-Info "[INFO] Custom uv install directory: $installDir"
+    }
     Write-Step "[INSTALL] uv..."
 
     try {
-        powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex" | Out-Null
+        if ($installDir) {
+            $escapedInstallDir = $installDir.Replace("'", "''")
+            powershell -ExecutionPolicy ByPass -Command "& {`$env:UV_INSTALL_DIR='$escapedInstallDir'; irm https://astral.sh/uv/install.ps1 | iex }" | Out-Null
+        } else {
+            powershell -ExecutionPolicy ByPass -Command "irm https://astral.sh/uv/install.ps1 | iex" | Out-Null
+        }
     } catch {
         Fail-AndExit "[ERROR] uv installation failed."
     }
 
-    $uvUserBin = Join-Path $HOME ".local\bin"
+    $uvUserBin = if ($installDir) { $installDir } else { $defaultInstallDir }
     if (Test-Path $uvUserBin) {
         $env:Path = "$uvUserBin;$env:Path"
     }
@@ -291,9 +494,14 @@ function Install-Node {
     $arch = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq [System.Runtime.InteropServices.Architecture]::Arm64) { "arm64" } else { "x64" }
     $url = "https://nodejs.org/dist/$version/node-$version-$arch.msi"
     $installerPath = Join-Path $env:TEMP "node-$version-$arch.msi"
+    $defaultInstallDir = Join-Path $env:ProgramFiles "nodejs"
+    $installDir = Get-InstallDirectoryChoice -ToolName "Node.js" -DefaultPath $defaultInstallDir
 
     Set-StageContext -Stage "Download Node.js installer" -OfflineUrl $url
     Write-Warn "[INFO] Installing the current official Node.js LTS release: $version"
+    if ($installDir) {
+        Write-Info "[INFO] Custom Node.js install directory: $installDir"
+    }
     Write-Step "[DOWNLOAD] Node.js installer..."
     try {
         Invoke-WebRequestWithRetry -Uri $url -OutFile $installerPath | Out-Null
@@ -304,7 +512,11 @@ function Install-Node {
     Set-StageContext -Stage "Install Node.js" -OfflineUrl $url
     Write-Warn "[INFO] A UAC prompt or installer window may appear. Allow it and do not close this script window."
     Write-Step "[INSTALL] Node.js..."
-    Invoke-ExternalCommand -FilePath "msiexec.exe" -Arguments @("/i", $installerPath, "/passive", "/norestart") -FailureMessage "[ERROR] Node.js installation failed."
+    $msiArguments = @("/i", $installerPath, "/passive", "/norestart")
+    if ($installDir) {
+        $msiArguments += "INSTALLDIR=$installDir"
+    }
+    Invoke-ExternalCommand -FilePath "msiexec.exe" -Arguments $msiArguments -FailureMessage "[ERROR] Node.js installation failed."
     Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue
     Set-StageContext -Stage "Verify Node.js" -OfflineUrl $url
     Write-Warn "[INFO] Waiting for Node.js installation result. This may take a few minutes."
@@ -316,23 +528,72 @@ function Install-Node {
 }
 
 function Install-Git {
-    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-        Fail-AndExit "[ERROR] winget is not available. Git auto-install currently requires the official winget path."
+    $gitInstaller = Get-GitLatestInstallerInfo
+    $installerPath = Join-Path $env:TEMP $gitInstaller.FileName
+    $defaultInstallDir = Join-Path $env:ProgramFiles "Git"
+    $installDir = Get-InstallDirectoryChoice -ToolName "Git" -DefaultPath $defaultInstallDir
+
+    Set-StageContext -Stage "Download Git installer" -OfflineUrl $gitInstaller.ReleaseUrl
+    Write-Warn "[INFO] Installing the latest official Git for Windows release: $($gitInstaller.Version)"
+    if ($installDir) {
+        Write-Info "[INFO] Custom Git install directory: $installDir"
+    }
+    Write-Step "[DOWNLOAD] Git installer..."
+    try {
+        Invoke-WebRequestWithRetry -Uri $gitInstaller.DownloadUrl -OutFile $installerPath | Out-Null
+    } catch {
+        Fail-AndExit "[ERROR] Git installer download failed. Offline installer: $($gitInstaller.ReleaseUrl)"
     }
 
-    Set-StageContext -Stage "Install Git" -OfflineUrl "https://git-scm.com/download/win"
-    Write-Warn "[INFO] Installing Git using the official winget path shown on the Git site."
+    $effectiveInstallDir = if ($installDir) { $installDir } else { $defaultInstallDir }
+    $infPath = Join-Path $env:TEMP ("git_options_{0}.inf" -f ([guid]::NewGuid().ToString("N")))
+    $infContent = @"
+[Setup]
+Lang=default
+Dir=$effectiveInstallDir
+Group=Git
+NoIcons=0
+SetupType=default
+Components=gitlfs,assoc,assoc_sh,windowsterminal
+Tasks=
+EditorOption=VIM
+CustomEditorPath=
+DefaultBranchOption=main
+PathOption=Cmd
+SSHOption=OpenSSH
+TortoiseOption=false
+CURLOption=WinSSL
+CRLFOption=CRLFCommitAsIs
+BashTerminalOption=MinTTY
+GitPullBehaviorOption=Merge
+UseCredentialManager=Enabled
+PerformanceTweaksFSCache=Enabled
+EnableSymlinks=Disabled
+EnablePseudoConsoleSupport=Disabled
+EnableFSMonitor=Disabled
+"@
+    Set-Content -Path $infPath -Value $infContent -Encoding ASCII
+
+    Set-StageContext -Stage "Install Git" -OfflineUrl $gitInstaller.ReleaseUrl
+    Write-Warn "[INFO] Installing Git using the official Git for Windows unattended installer path."
     Write-Warn "[INFO] A UAC prompt or installer window may appear. Allow it and do not close this script window."
     Write-Step "[INSTALL] Git..."
-    Invoke-ExternalCommand -FilePath "winget" -Arguments @("install", "--id", "Git.Git", "-e", "--source", "winget", "--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity") -FailureMessage "[ERROR] Git installation failed."
-    Set-StageContext -Stage "Verify Git" -OfflineUrl "https://git-scm.com/download/win"
+    Invoke-ExternalCommand -FilePath $installerPath -Arguments @("/VERYSILENT", "/NORESTART", "/NOCANCEL", "/SP-", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS", "/LOADINF=$infPath") -FailureMessage "[ERROR] Git installation failed."
+    Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path $infPath -Force -ErrorAction SilentlyContinue
+    Set-StageContext -Stage "Verify Git" -OfflineUrl $gitInstaller.ReleaseUrl
     Write-Warn "[INFO] Waiting for Git installation result. This may take a few minutes."
     Write-Step "[VERIFY] Git..."
     return Wait-ForInstallResult -Name "Git" -Commands @("git")
 }
 
 function Install-Python {
-    if (Get-Command winget -ErrorAction SilentlyContinue) {
+    $version = Get-PythonLatestStableVersion
+    $versionParts = $version.Split('.')
+    $defaultInstallDir = Join-Path $env:LOCALAPPDATA ("Programs/Python/Python{0}{1}" -f $versionParts[0], $versionParts[1])
+    $installDir = Get-InstallDirectoryChoice -ToolName "Python" -DefaultPath $defaultInstallDir
+
+    if ((Get-Command winget -ErrorAction SilentlyContinue) -and -not $installDir) {
         Set-StageContext -Stage "Install Python Install Manager" -OfflineUrl "https://docs.python.org/3/using/windows.html"
         Write-Warn "[INFO] Installing Python Install Manager, then Python 3."
         Write-Warn "[INFO] A UAC prompt or installer window may appear. Allow it and do not close this script window."
@@ -340,7 +601,7 @@ function Install-Python {
         Invoke-ExternalCommand -FilePath "winget" -Arguments @("install", "9NQ7512CXL7T", "-e", "--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity") -FailureMessage "[ERROR] Python Install Manager installation failed."
 
         Refresh-Path
-        $pythonManager = Get-InstalledCommand -Candidates @("pymanager", "py")
+        $pythonManager = Find-PythonManagerExecutable
         if ($pythonManager) {
             try {
                 Set-StageContext -Stage "Configure Python Install Manager" -OfflineUrl "https://docs.python.org/3/using/windows.html"
@@ -354,21 +615,31 @@ function Install-Python {
                 Set-StageContext -Stage "Install Python 3 via Python Install Manager" -OfflineUrl "https://docs.python.org/3/using/windows.html"
                 Write-Step "[INSTALL] Python 3..."
                 & $pythonManager install 3 | Out-Null
+                try {
+                    & $pythonManager install --refresh | Out-Null
+                } catch {
+                    Write-Warn "[WARN] Python command aliases were not refreshed in this terminal."
+                }
             } catch {
                 Write-Warn "[WARN] Python runtime installation did not finish in this terminal."
             }
         } else {
-            Write-Warn "[WARN] pymanager/py is not visible yet in this terminal."
+            Write-Warn "[WARN] Python Install Manager is not visible yet in this terminal."
         }
     } else {
-        $version = Get-PythonLatestStableVersion
         $arch = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq [System.Runtime.InteropServices.Architecture]::Arm64) { "arm64" } else { "amd64" }
         $installerName = "python-$version-$arch.exe"
         $url = "https://www.python.org/ftp/python/$version/$installerName"
         $installerPath = Join-Path $env:TEMP $installerName
+        $effectiveInstallDir = if ($installDir) { $installDir } else { $defaultInstallDir }
 
         Set-StageContext -Stage "Download Python installer" -OfflineUrl $url
-        Write-Warn "[INFO] winget is not available. Falling back to the official Python installer."
+        if ($installDir) {
+            Write-Warn "[INFO] Custom install directory was selected. Using the official Python installer."
+            Write-Info "[INFO] Custom Python install directory: $installDir"
+        } else {
+            Write-Warn "[INFO] winget is not available. Falling back to the official Python installer."
+        }
         Write-Warn "[INFO] Installing Python stable release: $version"
         Write-Step "[DOWNLOAD] Python installer..."
         try {
@@ -386,7 +657,8 @@ function Install-Python {
             "PrependPath=1",
             "Include_test=0",
             "Include_launcher=1",
-            "InstallLauncherAllUsers=0"
+            "InstallLauncherAllUsers=0",
+            "TargetDir=$effectiveInstallDir"
         ) -FailureMessage "[ERROR] Python installer execution failed."
 
         Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue
@@ -440,13 +712,39 @@ function Test-Tool {
         [string[]]$Commands
     )
 
+    function Test-IsWindowsStoreAlias {
+        param([string]$Path)
+
+        if ([string]::IsNullOrWhiteSpace($Path)) {
+            return $false
+        }
+
+        return $Path -like "*\AppData\Local\Microsoft\WindowsApps\python*.exe"
+    }
+
     foreach ($commandName in $Commands) {
         $command = Get-Command $commandName -ErrorAction SilentlyContinue
         if ($command) {
             try {
-                $version = (& $command.Name --version | Select-Object -First 1).Trim()
+                if (Test-IsWindowsStoreAlias -Path $command.Source) {
+                    Write-Host "[FAIL] $Name points to the Microsoft Store alias, not a real runtime." -ForegroundColor Red
+                    Write-Host "     Path: $($command.Source)"
+                    return
+                }
+
+                $versionLine = (& $command.Name --version 2>&1 | Select-Object -First 1)
+                if ($null -eq $versionLine) {
+                    throw "No version output"
+                }
+
+                $version = $versionLine.ToString().Trim()
+                if ([string]::IsNullOrWhiteSpace($version) -or $version -match "Microsoft Store" -or $version -match "ms-windows-store") {
+                    throw "Invalid version output"
+                }
             } catch {
-                $version = "Version lookup failed"
+                Write-Host "[FAIL] $Name is present in PATH, but the runtime is not usable yet." -ForegroundColor Red
+                Write-Host "     Path: $($command.Source)"
+                return
             }
 
             Write-Host ("[OK] {0}: {1}" -f $Name, $version) -ForegroundColor Green
