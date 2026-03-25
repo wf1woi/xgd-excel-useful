@@ -61,6 +61,24 @@ class ImportTaskService:
             raise ValueError("导入任务不存在")
         return ImportTaskResponse.model_validate(entity)
 
+    def delete_task(self, task_id: int) -> None:
+        entity = self.task_repository.get_by_id(task_id)
+        if entity is None:
+            raise ValueError("导入任务不存在")
+        if entity.status in {"pending", "running"}:
+            raise ValueError("正在执行中的导入任务暂不支持删除")
+
+        stored_file_path = entity.stored_file_path
+        self.task_repository.delete(entity)
+
+        if stored_file_path:
+            file_path = Path(stored_file_path)
+            try:
+                if file_path.exists():
+                    file_path.unlink()
+            except OSError:
+                logger.warning("Failed to delete import task file. task_id=%s path=%s", task_id, stored_file_path)
+
     def update_progress(
         self,
         task_id: int,

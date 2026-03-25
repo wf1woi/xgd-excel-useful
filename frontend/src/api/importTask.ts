@@ -1,4 +1,4 @@
-import { getJson, postFormData } from './client'
+import { deleteJson, getJson, postFormData } from './client'
 import type { ImportTask } from '../types'
 
 export function fetchImportTasks(): Promise<ImportTask[]> {
@@ -17,4 +17,8 @@ export function createImportTask(params: {
   }
   formData.append('file', params.file)
   return postFormData<ImportTask>('/import-tasks', formData)
+}
+
+export function deleteImportTask(taskId: number): Promise<{ deleted: boolean }> {
+  return deleteJson<{ deleted: boolean }>(`/import-tasks/${taskId}`)
 }

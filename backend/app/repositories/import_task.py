@@ -26,3 +26,7 @@ class ImportTaskRepository:
         self.db.commit()
         self.db.refresh(entity)
         return entity
+
+    def delete(self, entity: ImportTask) -> None:
+        self.db.delete(entity)
+        self.db.commit()

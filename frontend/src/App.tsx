@@ -3,7 +3,7 @@ import './App.css'
 import { fetchDetailRecords } from './api/detailRecord'
 import { downloadExportExcel, generateExportPreview } from './api/exportPreview'
 import { deleteImportBatch, fetchImportBatches } from './api/importBatch'
-import { createImportTask, fetchImportTasks } from './api/importTask'
+import { createImportTask, deleteImportTask, fetchImportTasks } from './api/importTask'
 import {
   createParserConfig,
   deleteParserConfig,
@@ -319,6 +319,66 @@ function cloneTemplateOutputs(outputs: TemplateRuleOutputConfig[]): TemplateRule
   }))
 }
 
+function getTemplateFieldOptionLabel(fieldName: string, displayName: string): string {
+  const normalizedFieldName = fieldName.trim()
+  const normalizedDisplayName = displayName.trim()
+  if (!normalizedDisplayName || normalizedDisplayName === normalizedFieldName) {
+    return normalizedFieldName
+  }
+  return `${normalizedDisplayName} (${normalizedFieldName})`
+}
+
+function getTemplateOutputFieldOptions(
+  outputs: TemplateRuleOutputConfig[],
+  output: TemplateRuleOutputConfig,
+): Array<{ value: string; label: string }> {
+  const options = new Map<string, string>()
+
+  outputs.forEach((currentOutput) => {
+    currentOutput.fields.forEach((field) => {
+      const fieldName = field.field_name.trim()
+      if (!fieldName) {
+        return
+      }
+      options.set(fieldName, getTemplateFieldOptionLabel(fieldName, field.display_name || fieldName))
+    })
+
+    currentOutput.filters.forEach((filter) => {
+      const fieldName = (filter.field_name || '').trim()
+      if (!fieldName || options.has(fieldName)) {
+        return
+      }
+      options.set(fieldName, fieldName)
+    })
+
+    currentOutput.group_by_fields.forEach((fieldName) => {
+      const normalized = fieldName.trim()
+      if (!normalized || options.has(normalized)) {
+        return
+      }
+      options.set(normalized, normalized)
+    })
+
+    currentOutput.aggregations.forEach((aggregation) => {
+      const fieldName = aggregation.field_name.trim()
+      if (!fieldName || options.has(fieldName)) {
+        return
+      }
+      options.set(fieldName, fieldName)
+    })
+  })
+
+  output.fields.forEach((field) => {
+    const fieldName = field.field_name.trim()
+    if (!fieldName) {
+      return
+    }
+    options.set(fieldName, getTemplateFieldOptionLabel(fieldName, field.display_name || fieldName))
+  })
+
+  return Array.from(options.entries()).map(([value, label]) => ({ value, label }))
+}
+
 function normalizeTemplateRule(rule: TemplateRuleSet): TemplateRuleSet {
   return {
     ...rule,
@@ -570,6 +630,7 @@ function App() {
   const [isImportingTemplate, setIsImportingTemplate] = useState(false)
   const [templatePage, setTemplatePage] = useState(1)
   const [templatePageInput, setTemplatePageInput] = useState('1')
+  const [templateKeyword, setTemplateKeyword] = useState('')
   const [templateTotalPages, setTemplateTotalPages] = useState(1)
   const [templateTotal, setTemplateTotal] = useState(0)
   const templatePageSize = 20
@@ -761,8 +822,11 @@ function App() {
   }, [])
 
   useEffect(() => {
-    void loadTemplateRules(templatePage)
-  }, [templatePage])
+    const timer = window.setTimeout(() => {
+      void loadTemplateRules(templatePage, templateKeyword)
+    }, 200)
+    return () => window.clearTimeout(timer)
+  }, [templateKeyword, templatePage])
 
   useEffect(() => {
     if (!templateImportActiveSheet || !activeTemplateImportSampleRule) {
@@ -930,11 +994,11 @@ function App() {
     }
   }
 
-  async function loadTemplateRules(page = templatePage) {
+  async function loadTemplateRules(page = templatePage, keyword = templateKeyword) {
     setIsLoadingTemplates(true)
     setTemplateListError('')
     try {
-      const data = await fetchTemplateRules(page, templatePageSize)
+      const data = await fetchTemplateRules(page, templatePageSize, keyword)
       const items = data.items.map(normalizeTemplateRule)
       setTemplateRules(items)
       setSelectedTemplateRuleId((current) => {
@@ -1959,6 +2023,17 @@ function App() {
     }
   }
 
+  async function handleDeleteImportTask(taskId: number) {
+    setImportError('')
+    try {
+      await deleteImportTask(taskId)
+      setImportTasks((current) => current.filter((item) => item.id !== taskId))
+      previousActiveImportTaskIdsRef.current = previousActiveImportTaskIdsRef.current.filter((item) => item !== taskId)
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : '导入任务删除失败')
+    }
+  }
+
   function openDeleteConfirm(state: ConfirmDialogState) {
     setConfirmDialog(state)
   }
@@ -2115,13 +2190,14 @@ function App() {
                       <th>进度</th>
                       <th>结果</th>
                       <th>时间</th>
+                      <th>操作</th>
                     </tr>
                   </thead>
                   <tbody>
                     {isLoadingImportTasks ? (
-                      <tr><td colSpan={6} className="table-empty">正在加载...</td></tr>
+                      <tr><td colSpan={7} className="table-empty">正在加载...</td></tr>
                     ) : importTasks.length === 0 ? (
-                      <tr><td colSpan={6} className="table-empty">暂无导入任务</td></tr>
+                      <tr><td colSpan={7} className="table-empty">暂无导入任务</td></tr>
                     ) : (
                       importTasks.map((task) => (
                         <tr key={task.id}>
@@ -2145,6 +2221,25 @@ function App() {
                             {task.error_message || (task.imported_rows > 0 ? `${task.imported_rows} 行` : '-')}
                           </td>
                           <td>{task.created_at.replace('T', ' ').slice(0, 19)}</td>
+                          <td>
+                            <button
+                              type="button"
+                              className="text-button"
+                              disabled={task.status === 'pending' || task.status === 'running'}
+                              onClick={() =>
+                                openDeleteConfirm({
+                                  title: '删除导入任务',
+                                  message: `确认删除导入任务“${task.file_name}”？仅删除任务记录和上传文件，不会删除已生成的导入批次数据。`,
+                                  confirmLabel: '确认删除',
+                                  onConfirm: async () => {
+                                    await handleDeleteImportTask(task.id)
+                                  },
+                                })
+                              }
+                            >
+                              删除任务
+                            </button>
+                          </td>
                         </tr>
                       ))
                     )}
@@ -2396,6 +2491,19 @@ function App() {
               </div>
             </div>
             {templateListError ? <p className="state-text state-text--error">{templateListError}</p> : null}
+            <div className="template-filter-bar">
+              <label className="template-filter-bar__field">
+                <span>规则名称搜索</span>
+                <input
+                  value={templateKeyword}
+                  onChange={(event) => {
+                    setTemplateKeyword(event.target.value)
+                    setTemplatePage(1)
+                  }}
+                  placeholder="输入规则名称模糊搜索"
+                />
+              </label>
+            </div>
             <div className="table-shell">
               <table className="admin-table">
                 <thead>
@@ -3094,7 +3202,7 @@ function App() {
         <div className="dialog-backdrop" onClick={() => setTemplateDialogMode(null)}>
           <section className="dialog-panel dialog-panel--wide" onClick={(event) => event.stopPropagation()}>
             <div className="dialog-header"><h2>{editingTemplateRuleId ? '编辑模板规则' : '新建模板规则'}</h2><button type="button" className="ghost-button" onClick={() => setTemplateDialogMode(null)}>关闭</button></div>
-            <form className="config-form" onSubmit={handleSaveTemplate}>
+            <form className="config-form config-form--sticky-footer" onSubmit={handleSaveTemplate}>
               <label><span>规则编码</span><input value={templateForm.rule_code} onChange={(event) => setTemplateForm({ ...templateForm, rule_code: event.target.value })} required /></label>
               <label><span>规则名称</span><input value={templateForm.rule_name} onChange={(event) => setTemplateForm({ ...templateForm, rule_name: event.target.value })} required /></label>
               <label><span>规则分类</span><input value={templateForm.group_name} onChange={(event) => setTemplateForm({ ...templateForm, group_name: event.target.value })} required /></label>
@@ -3197,7 +3305,57 @@ function App() {
                       </div>
                       {output.source_type === 'aggregated_summary' ? (
                         <div className="editor-subsection">
-                          <label className="config-form__wide"><span>分组字段</span><input value={output.group_by_fields.join(', ')} onChange={(event) => updateTemplateOutput(outputIndex, (current) => ({ ...current, group_by_fields: event.target.value.split(',').map((item) => item.trim()).filter(Boolean) }))} placeholder="商户号, 商户名" /></label>
+                          <div className="editor-block__header">
+                            <h4>分组字段</h4>
+                            <button
+                              type="button"
+                              className="ghost-button"
+                              onClick={() => updateTemplateOutput(outputIndex, (current) => ({
+                                ...current,
+                                group_by_fields: [...current.group_by_fields, ''],
+                              }))}
+                            >
+                              新增分组字段
+                            </button>
+                          </div>
+                          <p className="config-card__meta">分组字段支持多个，当前下拉项来自本输出配置里的 Excel 字段。</p>
+                          <div className="stack-list">
+                            {output.group_by_fields.length === 0 ? (
+                              <div className="config-card__meta">尚未配置分组字段</div>
+                            ) : (
+                              output.group_by_fields.map((groupField, groupFieldIndex) => {
+                                const groupFieldOptions = getTemplateOutputFieldOptions(templateForm.outputs, output)
+                                return (
+                                  <div key={`${output.output_key}-group-${groupFieldIndex}`} className="inline-grid inline-grid--group-by">
+                                    <select
+                                      value={groupField}
+                                      onChange={(event) => updateTemplateOutput(outputIndex, (current) => ({
+                                        ...current,
+                                        group_by_fields: current.group_by_fields.map((item, index) => (
+                                          index === groupFieldIndex ? event.target.value : item
+                                        )),
+                                      }))}
+                                    >
+                                      <option value="">请选择分组字段</option>
+                                      {groupFieldOptions.map((option) => (
+                                        <option key={option.value} value={option.value}>{option.label}</option>
+                                      ))}
+                                    </select>
+                                    <button
+                                      type="button"
+                                      className="ghost-button"
+                                      onClick={() => updateTemplateOutput(outputIndex, (current) => ({
+                                        ...current,
+                                        group_by_fields: current.group_by_fields.filter((_, index) => index !== groupFieldIndex),
+                                      }))}
+                                    >
+                                      删除
+                                    </button>
+                                  </div>
+                                )
+                              })
+                            )}
+                          </div>
                           <div className="editor-block__header">
                             <h4>聚合字段</h4>
                             <button
@@ -3213,8 +3371,13 @@ function App() {
                           </div>
                           <div className="stack-list">
                             {output.aggregations.map((aggregation, aggregationIndex) => (
-                              <div key={`${output.output_key}-aggregation-${aggregationIndex}`} className="inline-grid inline-grid--wide">
-                                <input value={aggregation.field_name} onChange={(event) => updateTemplateOutput(outputIndex, (current) => ({ ...current, aggregations: current.aggregations.map((item, index) => index === aggregationIndex ? { ...item, field_name: event.target.value } : item) }))} placeholder="字段名" />
+                              <div key={`${output.output_key}-aggregation-${aggregationIndex}`} className="inline-grid inline-grid--aggregation">
+                                <select value={aggregation.field_name} onChange={(event) => updateTemplateOutput(outputIndex, (current) => ({ ...current, aggregations: current.aggregations.map((item, index) => index === aggregationIndex ? { ...item, field_name: event.target.value } : item) }))}>
+                                  <option value="">请选择聚合字段</option>
+                                  {getTemplateOutputFieldOptions(templateForm.outputs, output).map((option) => (
+                                    <option key={option.value} value={option.value}>{option.label}</option>
+                                  ))}
+                                </select>
                                 <select value={aggregation.aggregate_func} onChange={(event) => updateTemplateOutput(outputIndex, (current) => ({ ...current, aggregations: current.aggregations.map((item, index) => index === aggregationIndex ? { ...item, aggregate_func: event.target.value } : item) }))}>
                                   <option value="sum">sum</option>
                                   <option value="count">count</option>
@@ -3233,7 +3396,7 @@ function App() {
                 </div>
               </div>
               {templateFormError ? <p className="state-text state-text--error">{templateFormError}</p> : null}
-              <div className="form-actions"><button className="primary-button" type="submit" disabled={isSavingTemplate}>{isSavingTemplate ? '保存中...' : '保存'}</button></div>
+              <div className="form-actions form-actions--sticky"><button className="primary-button" type="submit" disabled={isSavingTemplate}>{isSavingTemplate ? '保存中...' : '保存'}</button></div>
             </form>
           </section>
         </div>
@@ -3486,7 +3649,54 @@ function App() {
                           </div>
                           {output.source_type === 'aggregated_summary' ? (
                             <div className="editor-subsection">
-                              <label className="config-form__wide"><span>分组字段</span><input value={output.group_by_fields.join(', ')} onChange={(event) => templateImportActiveSheet && updateTemplateImportOutput(templateImportActiveSheet, outputIndex, (current) => ({ ...current, group_by_fields: event.target.value.split(',').map((item) => item.trim()).filter(Boolean) }))} placeholder="商户号, 商户名" /></label>
+                              <div className="editor-block__header">
+                                <h4>分组字段</h4>
+                                <button
+                                  type="button"
+                                  className="ghost-button"
+                                  onClick={() => templateImportActiveSheet && updateTemplateImportOutput(templateImportActiveSheet, outputIndex, (current) => ({
+                                    ...current,
+                                    group_by_fields: [...current.group_by_fields, ''],
+                                  }))}
+                                >
+                                  新增分组字段
+                                </button>
+                              </div>
+                              <p className="config-card__meta">候选字段来自当前规则已识别的全部字段，不只限于当前输出里已展示的列。</p>
+                              <div className="stack-list">
+                                {output.group_by_fields.length === 0 ? (
+                                  <div className="config-card__meta">尚未配置分组字段</div>
+                                ) : (
+                                  output.group_by_fields.map((groupField, groupFieldIndex) => (
+                                    <div key={`template-import-output-group-${outputIndex}-${groupFieldIndex}`} className="inline-grid inline-grid--group-by">
+                                      <select
+                                        value={groupField}
+                                        onChange={(event) => templateImportActiveSheet && updateTemplateImportOutput(templateImportActiveSheet, outputIndex, (current) => ({
+                                          ...current,
+                                          group_by_fields: current.group_by_fields.map((item, index) => (
+                                            index === groupFieldIndex ? event.target.value : item
+                                          )),
+                                        }))}
+                                      >
+                                        <option value="">请选择分组字段</option>
+                                        {getTemplateOutputFieldOptions(activeTemplateImportOutputs, output).map((option) => (
+                                          <option key={option.value} value={option.value}>{option.label}</option>
+                                        ))}
+                                      </select>
+                                      <button
+                                        type="button"
+                                        className="ghost-button"
+                                        onClick={() => templateImportActiveSheet && updateTemplateImportOutput(templateImportActiveSheet, outputIndex, (current) => ({
+                                          ...current,
+                                          group_by_fields: current.group_by_fields.filter((_, index) => index !== groupFieldIndex),
+                                        }))}
+                                      >
+                                        删除
+                                      </button>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
                               <div className="editor-block__header">
                                 <h4>聚合字段</h4>
                                 <button
@@ -3502,8 +3712,13 @@ function App() {
                               </div>
                               <div className="stack-list">
                                 {output.aggregations.map((aggregation, aggregationIndex) => (
-                                  <div key={`template-import-output-aggregation-${outputIndex}-${aggregationIndex}`} className="inline-grid inline-grid--wide">
-                                    <input value={aggregation.field_name} onChange={(event) => templateImportActiveSheet && updateTemplateImportOutput(templateImportActiveSheet, outputIndex, (current) => ({ ...current, aggregations: current.aggregations.map((item, index) => index === aggregationIndex ? { ...item, field_name: event.target.value } : item) }))} placeholder="字段名" />
+                                  <div key={`template-import-output-aggregation-${outputIndex}-${aggregationIndex}`} className="inline-grid inline-grid--aggregation">
+                                    <select value={aggregation.field_name} onChange={(event) => templateImportActiveSheet && updateTemplateImportOutput(templateImportActiveSheet, outputIndex, (current) => ({ ...current, aggregations: current.aggregations.map((item, index) => index === aggregationIndex ? { ...item, field_name: event.target.value } : item) }))}>
+                                      <option value="">请选择聚合字段</option>
+                                      {getTemplateOutputFieldOptions(activeTemplateImportOutputs, output).map((option) => (
+                                        <option key={option.value} value={option.value}>{option.label}</option>
+                                      ))}
+                                    </select>
                                     <select value={aggregation.aggregate_func} onChange={(event) => templateImportActiveSheet && updateTemplateImportOutput(templateImportActiveSheet, outputIndex, (current) => ({ ...current, aggregations: current.aggregations.map((item, index) => index === aggregationIndex ? { ...item, aggregate_func: event.target.value } : item) }))}>
                                       <option value="sum">sum</option>
                                       <option value="count">count</option>

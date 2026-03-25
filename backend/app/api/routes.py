@@ -593,6 +593,24 @@ def get_import_task(
     return ApiResponse(data=task)
 
 
+@router.delete(
+    "/import-tasks/{task_id}",
+    response_model=ApiResponse[dict[str, bool]],
+    tags=["import-task"],
+)
+def delete_import_task(
+    task_id: int,
+    service: ImportTaskService = Depends(get_import_task_service),
+) -> ApiResponse[dict[str, bool]]:
+    try:
+        service.delete_task(task_id)
+    except ValueError as exc:
+        if "不存在" in str(exc):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return ApiResponse(message="deleted", data={"deleted": True})
+
+
 @router.post(
     "/import-batches",
     response_model=ApiResponse[ImportBatchCreateResponse],
