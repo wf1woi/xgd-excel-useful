@@ -80,10 +80,19 @@
   box-shadow: var(--surface-shadow-soft);
   backdrop-filter: blur(8px);
   min-width: 0;
+  position: relative;
 }
 
 .detail-result-panel {
   overflow: hidden;
+}
+
+.preview-page > .panel:first-child {
+  z-index: 5;
+}
+
+.preview-page > .detail-result-panel {
+  z-index: 1;
 }
 
 .panel-toolbar {
@@ -937,6 +946,7 @@
 
 .search-select {
   position: relative;
+  z-index: 12;
 }
 
 .search-select__panel {
@@ -944,7 +954,7 @@
   top: calc(100% + 6px);
   left: 0;
   right: 0;
-  z-index: 10;
+  z-index: 30;
   border: 1px solid #d5dfda;
   border-radius: 12px;
   background: #fff;
