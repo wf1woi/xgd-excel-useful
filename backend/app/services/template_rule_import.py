@@ -257,6 +257,7 @@ class TemplateRuleImportService:
                     "filters": self._build_default_filters(rule_item),
                     "group_by_fields": [],
                     "aggregations": [],
+                    "preview_summary_items": [],
                     "sort_by": [],
                 },
             )

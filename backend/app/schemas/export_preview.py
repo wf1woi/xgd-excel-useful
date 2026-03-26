@@ -17,6 +17,13 @@ class ExportPreviewSheetSummary(BaseModel):
     source_type: str
 
 
+class ExportPreviewStatistic(BaseModel):
+    label: str
+    field_name: str
+    aggregate_func: str
+    value: str
+
+
 class ExportPreviewResponse(BaseModel):
     parser_config_name: str
     import_batch_code: str
@@ -27,6 +34,7 @@ class ExportPreviewResponse(BaseModel):
     available_outputs: list[ExportPreviewSheetSummary]
     headers: list[str]
     rows: list[list[str]]
+    statistics: list[ExportPreviewStatistic]
     notes: list[str]
     page: int
     page_size: int

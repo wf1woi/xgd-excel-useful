@@ -24,6 +24,8 @@ class ExportExcelService:
 
         header_fill = PatternFill(fill_type="solid", fgColor="1F4D43")
         header_font = Font(color="FFFFFF", bold=True)
+        summary_fill = PatternFill(fill_type="solid", fgColor="F3F8F5")
+        summary_font = Font(bold=True)
 
         for sheet_preview in workbook_preview.sheets:
             worksheet = workbook.create_sheet(title=sheet_preview.sheet_name[:31] or "Sheet")
@@ -37,6 +39,13 @@ class ExportExcelService:
             for row_index, row in enumerate(sheet_preview.rows, start=2):
                 for column_index, value in enumerate(row, start=1):
                     worksheet.cell(row=row_index, column=column_index, value=value)
+
+            if sheet_preview.summary_row:
+                summary_row_index = len(sheet_preview.rows) + 2
+                for column_index, value in enumerate(sheet_preview.summary_row, start=1):
+                    cell = worksheet.cell(row=summary_row_index, column=column_index, value=value)
+                    cell.fill = summary_fill
+                    cell.font = summary_font
 
             worksheet.freeze_panes = "A2"
 

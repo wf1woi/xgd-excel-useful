@@ -90,6 +90,12 @@ export type TemplateRuleAggregation = {
   alias: string
 }
 
+export type TemplateRulePreviewSummary = {
+  field_name: string
+  label: string
+  aggregate_func: string
+}
+
 export type TemplateRuleOutputConfig = {
   output_key: string
   sheet_name: string
@@ -99,6 +105,7 @@ export type TemplateRuleOutputConfig = {
   filters: TemplateRuleFilter[]
   group_by_fields: string[]
   aggregations: TemplateRuleAggregation[]
+  preview_summary_items: TemplateRulePreviewSummary[]
   sort_by: Array<{ field_name?: string; field?: string; direction: string }>
 }
 
@@ -193,6 +200,12 @@ export type ExportPreviewResult = {
   }>
   headers: string[]
   rows: string[][]
+  statistics: Array<{
+    label: string
+    field_name: string
+    aggregate_func: string
+    value: string
+  }>
   notes: string[]
   page: number
   page_size: number

@@ -24,6 +24,12 @@ class TemplateRuleFilterPayload(BaseModel):
     value_template: str | None = None
 
 
+class TemplateRulePreviewSummaryPayload(BaseModel):
+    field_name: str = Field(min_length=1, max_length=255)
+    label: str = Field(min_length=1, max_length=255)
+    aggregate_func: str = Field(default="sum", min_length=1, max_length=32)
+
+
 class TemplateRuleOutputConfigPayload(BaseModel):
     output_key: str = Field(min_length=1, max_length=64)
     sheet_name: str = Field(min_length=1, max_length=128)
@@ -33,6 +39,7 @@ class TemplateRuleOutputConfigPayload(BaseModel):
     filters: list[TemplateRuleFilterPayload] = Field(default_factory=list)
     group_by_fields: list[str] = Field(default_factory=list)
     aggregations: list[TemplateRuleAggregationPayload] = Field(default_factory=list)
+    preview_summary_items: list[TemplateRulePreviewSummaryPayload] = Field(default_factory=list)
     sort_by: list[dict] = Field(default_factory=list)
 
 

@@ -37,6 +37,7 @@ import type {
   TemplateRuleImportPreviewResult,
   TemplateRuleOutputConfig,
   TemplateRuleOutputField,
+  TemplateRulePreviewSummary,
   TemplateRuleSet,
 } from './types'
 
@@ -78,6 +79,7 @@ const initialTemplateForm: TemplateRuleCreatePayload = {
       filters: [],
       group_by_fields: [],
       aggregations: [],
+      preview_summary_items: [],
       sort_by: [],
     },
   ],
@@ -270,6 +272,14 @@ function createEmptyAggregation(): TemplateRuleAggregation {
   }
 }
 
+function createEmptyPreviewSummary(): TemplateRulePreviewSummary {
+  return {
+    field_name: '',
+    label: '',
+    aggregate_func: 'sum',
+  }
+}
+
 function createEmptyOutputConfig(index: number): TemplateRuleOutputConfig {
   const outputKey = index === 0 ? 'detail' : `output_${index + 1}`
   return {
@@ -281,6 +291,7 @@ function createEmptyOutputConfig(index: number): TemplateRuleOutputConfig {
     filters: [],
     group_by_fields: [],
     aggregations: [],
+    preview_summary_items: [],
     sort_by: [],
   }
 }
@@ -300,6 +311,7 @@ function buildTemplateFormFromRule(rule: TemplateRuleSet): TemplateRuleCreatePay
       filters: output.filters.map((filter) => ({ ...filter })),
       group_by_fields: [...output.group_by_fields],
       aggregations: output.aggregations.map((item) => ({ ...item })),
+      preview_summary_items: (output.preview_summary_items ?? []).map((item) => ({ ...item })),
       sort_by: output.sort_by.map((item) => ({ ...item })),
     })),
     status: rule.status,
@@ -315,6 +327,7 @@ function cloneTemplateOutputs(outputs: TemplateRuleOutputConfig[]): TemplateRule
     filters: output.filters.map((filter) => ({ ...filter })),
     group_by_fields: [...output.group_by_fields],
     aggregations: output.aggregations.map((item) => ({ ...item })),
+    preview_summary_items: (output.preview_summary_items ?? []).map((item) => ({ ...item })),
     sort_by: output.sort_by.map((item) => ({ ...item })),
   }))
 }
@@ -385,7 +398,18 @@ function normalizeTemplateRule(rule: TemplateRuleSet): TemplateRuleSet {
     group_name: rule.group_name || '默认分类',
     source_sheet_name: rule.source_sheet_name || 'Sheet1',
     rule_item: rule.rule_item || {},
-    outputs: Array.isArray(rule.outputs) ? rule.outputs : [],
+    outputs: Array.isArray(rule.outputs)
+      ? rule.outputs.map((output) => ({
+          ...output,
+          title_rows: output.title_rows ?? [],
+          fields: output.fields ?? [],
+          filters: output.filters ?? [],
+          group_by_fields: output.group_by_fields ?? [],
+          aggregations: output.aggregations ?? [],
+          preview_summary_items: output.preview_summary_items ?? [],
+          sort_by: output.sort_by ?? [],
+        }))
+      : [],
   }
 }
 
@@ -2720,6 +2744,17 @@ function App() {
                   <span>{previewResult.output_sheet_name}</span>
                   <span>共 {previewResult.total} 行</span>
                 </div>
+                {previewResult.statistics.length > 0 ? (
+                  <div className="preview-statistics">
+                    {previewResult.statistics.map((item) => (
+                      <div key={`${item.field_name}-${item.label}`} className="preview-statistics__item">
+                        <span>{item.label}</span>
+                        <strong>{item.value}</strong>
+                        <small>{item.aggregate_func}</small>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
                 <div className="table-shell table-shell--detail">
                   <table className="admin-table admin-table--sticky">
                     <thead><tr>{previewResult.headers.map((header) => (<th key={header}>{header}</th>))}</tr></thead>
@@ -3192,6 +3227,7 @@ function App() {
                     <div className="config-card__meta">{`${output.source_type} | 字段 ${output.fields.length} 个 | 过滤 ${output.filters.length} 条`}</div>
                     {output.group_by_fields.length > 0 ? <div className="config-card__meta">{`分组: ${output.group_by_fields.join('、')}`}</div> : null}
                     {output.aggregations.length > 0 ? <div className="config-card__meta">{`聚合: ${output.aggregations.map((item) => `${item.alias}:${item.aggregate_func}`).join('；')}`}</div> : null}
+                    {output.preview_summary_items.length > 0 ? <div className="config-card__meta">{`预览统计: ${output.preview_summary_items.map((item) => `${item.label}:${item.aggregate_func}`).join('；')}`}</div> : null}
                   </article>
                 ))}
               </div>
@@ -3303,6 +3339,45 @@ function App() {
                               <button type="button" className="ghost-button" onClick={() => updateTemplateOutput(outputIndex, (current) => ({ ...current, filters: current.filters.filter((_, index) => index !== filterIndex) }))}>删除</button>
                             </div>
                           ))}
+                        </div>
+                      </div>
+                      <div className="editor-subsection">
+                        <div className="editor-block__header">
+                          <h4>预览统计项</h4>
+                          <button
+                            type="button"
+                            className="ghost-button"
+                            onClick={() => updateTemplateOutput(outputIndex, (current) => ({
+                              ...current,
+                              preview_summary_items: [...(current.preview_summary_items ?? []), createEmptyPreviewSummary()],
+                            }))}
+                          >
+                            新增统计项
+                          </button>
+                        </div>
+                        <div className="stack-list">
+                          {(output.preview_summary_items ?? []).length === 0 ? (
+                            <div className="config-card__meta">未配置预览统计项时，预览顶部不会显示统计行。</div>
+                          ) : (
+                            (output.preview_summary_items ?? []).map((summary, summaryIndex) => (
+                              <div key={`${output.output_key}-summary-${summaryIndex}`} className="inline-grid inline-grid--summary">
+                                <select value={summary.field_name} onChange={(event) => updateTemplateOutput(outputIndex, (current) => ({ ...current, preview_summary_items: (current.preview_summary_items ?? []).map((item, index) => index === summaryIndex ? { ...item, field_name: event.target.value } : item) }))}>
+                                  <option value="">请选择统计列</option>
+                                  {getTemplateOutputFieldOptions(templateForm.outputs, output).map((option) => (
+                                    <option key={option.value} value={option.value}>{option.label}</option>
+                                  ))}
+                                </select>
+                                <input value={summary.label} onChange={(event) => updateTemplateOutput(outputIndex, (current) => ({ ...current, preview_summary_items: (current.preview_summary_items ?? []).map((item, index) => index === summaryIndex ? { ...item, label: event.target.value } : item) }))} placeholder="统计字段名，如 交易金额合计" />
+                                <select value={summary.aggregate_func} onChange={(event) => updateTemplateOutput(outputIndex, (current) => ({ ...current, preview_summary_items: (current.preview_summary_items ?? []).map((item, index) => index === summaryIndex ? { ...item, aggregate_func: event.target.value } : item) }))}>
+                                  <option value="sum">sum</option>
+                                  <option value="count">count</option>
+                                  <option value="max">max</option>
+                                  <option value="min">min</option>
+                                </select>
+                                <button type="button" className="ghost-button" onClick={() => updateTemplateOutput(outputIndex, (current) => ({ ...current, preview_summary_items: (current.preview_summary_items ?? []).filter((_, index) => index !== summaryIndex) }))}>删除</button>
+                              </div>
+                            ))
+                          )}
                         </div>
                       </div>
                       {output.source_type === 'aggregated_summary' ? (
@@ -3647,6 +3722,45 @@ function App() {
                                   <button type="button" className="ghost-button" onClick={() => templateImportActiveSheet && updateTemplateImportOutput(templateImportActiveSheet, outputIndex, (current) => ({ ...current, filters: current.filters.filter((_, index) => index !== filterIndex) }))}>删除</button>
                                 </div>
                               ))}
+                            </div>
+                          </div>
+                          <div className="editor-subsection">
+                            <div className="editor-block__header">
+                              <h4>预览统计项</h4>
+                              <button
+                                type="button"
+                                className="ghost-button"
+                                onClick={() => templateImportActiveSheet && updateTemplateImportOutput(templateImportActiveSheet, outputIndex, (current) => ({
+                                  ...current,
+                                  preview_summary_items: [...(current.preview_summary_items ?? []), createEmptyPreviewSummary()],
+                                }))}
+                              >
+                                新增统计项
+                              </button>
+                            </div>
+                            <div className="stack-list">
+                              {(output.preview_summary_items ?? []).length === 0 ? (
+                                <div className="config-card__meta">未配置预览统计项时，预览顶部不会显示统计行。</div>
+                              ) : (
+                                (output.preview_summary_items ?? []).map((summary, summaryIndex) => (
+                                  <div key={`template-import-output-summary-${outputIndex}-${summaryIndex}`} className="inline-grid inline-grid--summary">
+                                    <select value={summary.field_name} onChange={(event) => templateImportActiveSheet && updateTemplateImportOutput(templateImportActiveSheet, outputIndex, (current) => ({ ...current, preview_summary_items: (current.preview_summary_items ?? []).map((item, index) => index === summaryIndex ? { ...item, field_name: event.target.value } : item) }))}>
+                                      <option value="">请选择统计列</option>
+                                      {getTemplateOutputFieldOptions(activeTemplateImportOutputs, output).map((option) => (
+                                        <option key={option.value} value={option.value}>{option.label}</option>
+                                      ))}
+                                    </select>
+                                    <input value={summary.label} onChange={(event) => templateImportActiveSheet && updateTemplateImportOutput(templateImportActiveSheet, outputIndex, (current) => ({ ...current, preview_summary_items: (current.preview_summary_items ?? []).map((item, index) => index === summaryIndex ? { ...item, label: event.target.value } : item) }))} placeholder="统计字段名，如 交易金额合计" />
+                                    <select value={summary.aggregate_func} onChange={(event) => templateImportActiveSheet && updateTemplateImportOutput(templateImportActiveSheet, outputIndex, (current) => ({ ...current, preview_summary_items: (current.preview_summary_items ?? []).map((item, index) => index === summaryIndex ? { ...item, aggregate_func: event.target.value } : item) }))}>
+                                      <option value="sum">sum</option>
+                                      <option value="count">count</option>
+                                      <option value="max">max</option>
+                                      <option value="min">min</option>
+                                    </select>
+                                    <button type="button" className="ghost-button" onClick={() => templateImportActiveSheet && updateTemplateImportOutput(templateImportActiveSheet, outputIndex, (current) => ({ ...current, preview_summary_items: (current.preview_summary_items ?? []).filter((_, index) => index !== summaryIndex) }))}>删除</button>
+                                  </div>
+                                ))
+                              )}
                             </div>
                           </div>
                           {output.source_type === 'aggregated_summary' ? (

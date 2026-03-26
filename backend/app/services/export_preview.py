@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from math import ceil
 
 from app.engines.rules.preview_rule_engine import PreviewRuleEngine
@@ -10,6 +11,7 @@ from app.repositories.parser_config import ParserConfigRepository
 from app.repositories.template_rule_set import TemplateRuleSetRepository
 from app.schemas.export_preview import (
     ExportPreviewResponse,
+    ExportPreviewStatistic,
     ExportPreviewSheetSummary,
 )
 from app.services.dynamic_detail_table import DynamicDetailTableManager
@@ -26,6 +28,8 @@ class WorkbookSheetPreview:
     source_type: str
     headers: list[str]
     rows: list[list[str]]
+    statistics: list[ExportPreviewStatistic]
+    summary_row: list[str]
     notes: list[str]
 
 
@@ -104,6 +108,7 @@ class ExportPreviewService:
             ],
             headers=active_sheet.headers,
             rows=paged_rows,
+            statistics=active_sheet.statistics,
             notes=active_sheet.notes,
             page=resolved_page,
             page_size=page_size,
@@ -152,6 +157,9 @@ class ExportPreviewService:
                 rule_item=template_rule.rule_item,
                 runtime_context=runtime_context,
             )
+            column_keys = self._resolve_output_column_keys(available_fields, output)
+            statistics = self._build_statistics(headers, rows, column_keys, output)
+            summary_row = self._build_summary_row(headers, column_keys, statistics)
             notes = self._build_notes(
                 parser_config_name=parser_config.config_name,
                 template_rule_name=template_rule.rule_name,
@@ -168,6 +176,8 @@ class ExportPreviewService:
                     source_type=str(output.get("source_type") or "filtered_detail"),
                     headers=headers,
                     rows=rows,
+                    statistics=statistics,
+                    summary_row=summary_row,
                     notes=notes,
                 )
             )
@@ -226,6 +236,7 @@ class ExportPreviewService:
             "filters": [],
             "group_by_fields": [],
             "aggregations": [],
+            "preview_summary_items": [],
             "sort_by": [],
         }
 
@@ -282,3 +293,155 @@ class ExportPreviewService:
         if len(import_batches) == 1:
             return import_batches[0].file_name
         return f"{import_batches[0].batch_code}（{len(import_batches)}个文件）"
+
+    def _resolve_output_column_keys(self, available_fields: list[dict], output_config: dict) -> list[str]:
+        source_type = str(output_config.get("source_type") or "filtered_detail")
+        field_aliases = {
+            alias: item["field_name"]
+            for item in available_fields
+            for alias in (item["field_name"], item["header_name"])
+        }
+        if source_type == "aggregated_summary":
+            group_by_fields = [
+                resolved
+                for resolved in (
+                    field_aliases.get(str(field_name))
+                    for field_name in output_config.get("group_by_fields", [])
+                )
+                if resolved
+            ]
+            aggregations = []
+            for item in output_config.get("aggregations", []):
+                if not isinstance(item, dict):
+                    continue
+                field_name = field_aliases.get(str(item.get("field_name") or ""))
+                alias = str(item.get("alias") or field_name or "").strip()
+                if not field_name or not alias:
+                    continue
+                aggregations.append({"field_name": field_name, "alias": alias})
+
+            fields = output_config.get("fields")
+            if isinstance(fields, list) and fields:
+                combined_aliases = {
+                    **field_aliases,
+                    **{item["alias"]: item["alias"] for item in aggregations},
+                }
+                resolved_fields: list[str] = []
+                for item in sorted(fields, key=lambda field: int(field.get("field_order", 1))):
+                    if not isinstance(item, dict) or not bool(item.get("is_enabled", True)):
+                        continue
+                    field_name = combined_aliases.get(str(item.get("field_name") or ""))
+                    if field_name:
+                        resolved_fields.append(field_name)
+                if resolved_fields:
+                    return resolved_fields
+
+            return [*group_by_fields, *[item["alias"] for item in aggregations]]
+
+        fields = output_config.get("fields")
+        if isinstance(fields, list) and fields:
+            resolved_fields = []
+            for item in sorted(fields, key=lambda field: int(field.get("field_order", 1))):
+                if not isinstance(item, dict) or not bool(item.get("is_enabled", True)):
+                    continue
+                field_name = field_aliases.get(str(item.get("field_name") or ""))
+                if field_name:
+                    resolved_fields.append(field_name)
+            if resolved_fields:
+                return resolved_fields
+
+        return [item["field_name"] for item in available_fields]
+
+    def _build_statistics(
+        self,
+        headers: list[str],
+        rows: list[list[str]],
+        column_keys: list[str],
+        output_config: dict,
+    ) -> list[ExportPreviewStatistic]:
+        summary_items = output_config.get("preview_summary_items")
+        if not isinstance(summary_items, list) or not summary_items:
+            return []
+
+        statistics: list[ExportPreviewStatistic] = []
+        for item in summary_items:
+            if not isinstance(item, dict):
+                continue
+            field_name = str(item.get("field_name") or "").strip()
+            label = str(item.get("label") or field_name).strip()
+            aggregate_func = str(item.get("aggregate_func") or "sum").strip().lower()
+            if not field_name or not label:
+                continue
+            try:
+                column_index = column_keys.index(field_name)
+            except ValueError:
+                continue
+            values = [
+                row[column_index]
+                for row in rows
+                if column_index < len(row)
+            ]
+            statistics.append(
+                ExportPreviewStatistic(
+                    label=label,
+                    field_name=field_name,
+                    aggregate_func=aggregate_func,
+                    value=self._aggregate_statistic(values, aggregate_func),
+                )
+            )
+        return statistics
+
+    def _aggregate_statistic(self, values: list[str], aggregate_func: str) -> str:
+        normalized = [str(value).strip() for value in values if str(value).strip() != ""]
+        if aggregate_func == "count":
+            return str(len(normalized))
+
+        numeric_values: list[Decimal] = []
+        for value in normalized:
+            try:
+                numeric_values.append(Decimal(value.replace(",", "")))
+            except (InvalidOperation, AttributeError):
+                continue
+
+        if aggregate_func == "sum":
+            if not numeric_values:
+                return "0"
+            total = sum(numeric_values, Decimal("0"))
+            return self._format_decimal(total)
+        if aggregate_func == "max":
+            if numeric_values:
+                return self._format_decimal(max(numeric_values))
+            return max(normalized, default="")
+        if aggregate_func == "min":
+            if numeric_values:
+                return self._format_decimal(min(numeric_values))
+            return min(normalized, default="")
+        return str(len(normalized))
+
+    def _format_decimal(self, value: Decimal) -> str:
+        normalized = value.normalize()
+        if normalized == normalized.to_integral():
+            return str(normalized.quantize(Decimal("1")))
+        return format(normalized, "f").rstrip("0").rstrip(".")
+
+    def _build_summary_row(
+        self,
+        headers: list[str],
+        column_keys: list[str],
+        statistics: list[ExportPreviewStatistic],
+    ) -> list[str]:
+        if not headers or not statistics:
+            return []
+        summary_row = ["" for _ in headers]
+        summary_row[0] = "统计"
+        for item in statistics:
+            try:
+                column_index = column_keys.index(item.field_name)
+            except ValueError:
+                continue
+            cell_value = f"{item.label}:{item.value}"
+            if summary_row[column_index]:
+                summary_row[column_index] = f"{summary_row[column_index]} / {cell_value}"
+            else:
+                summary_row[column_index] = cell_value
+        return summary_row
