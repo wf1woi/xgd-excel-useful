@@ -82,6 +82,10 @@ EXPECTED_SCHEMA: dict[str, set[str]] = {
         "created_at",
         "updated_at",
     },
+    "import_task_queue_lock": {
+        "lock_name",
+        "locked_at",
+    },
 }
 
 # 只做向前兼容的缺列补齐；不处理删列和改类型。

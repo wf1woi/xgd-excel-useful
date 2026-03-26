@@ -36,7 +36,7 @@ from app.services.excel_preview import ExcelPreviewService
 from app.services.export_excel import ExportExcelService
 from app.services.export_preview import ExportPreviewService
 from app.services.import_batch import ImportBatchService
-from app.services.import_task import ImportTaskService, run_import_task, save_import_task_file
+from app.services.import_task import ImportTaskService, run_import_task_queue, save_import_task_file
 from app.services.parser_config import ParserConfigService
 from app.services.template_rule_set import TemplateRuleSetService
 from app.services.template_rule_import import TemplateRuleImportService
@@ -465,7 +465,24 @@ def preview_export(
             page_size=payload.page_size,
         )
     except ValueError as exc:
+        logger.warning(
+            "Export preview rejected. parser_config_id=%s template_rule_id=%s batch_code=%s output_key=%s error=%s",
+            payload.parser_config_id,
+            payload.template_rule_id,
+            payload.import_batch_code,
+            payload.output_key,
+            exc,
+        )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception:
+        logger.exception(
+            "Export preview failed. parser_config_id=%s template_rule_id=%s batch_code=%s output_key=%s",
+            payload.parser_config_id,
+            payload.template_rule_id,
+            payload.import_batch_code,
+            payload.output_key,
+        )
+        raise
     return ApiResponse(data=data)
 
 
@@ -515,7 +532,24 @@ def export_excel(
         )
         file_path = export_service.build_file(workbook_preview)
     except ValueError as exc:
+        logger.warning(
+            "Export excel rejected. parser_config_id=%s template_rule_id=%s batch_code=%s output_key=%s error=%s",
+            payload.parser_config_id,
+            payload.template_rule_id,
+            payload.import_batch_code,
+            payload.output_key,
+            exc,
+        )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception:
+        logger.exception(
+            "Export excel failed. parser_config_id=%s template_rule_id=%s batch_code=%s output_key=%s",
+            payload.parser_config_id,
+            payload.template_rule_id,
+            payload.import_batch_code,
+            payload.output_key,
+        )
+        raise
     return FileResponse(
         path=file_path,
         filename=file_path.name,
@@ -561,7 +595,7 @@ async def create_import_task(
     finally:
         await file.close()
 
-    background_tasks.add_task(run_import_task, task.id, engine)
+    background_tasks.add_task(run_import_task_queue, engine)
     return ApiResponse(message="accepted", data=task)
 
 

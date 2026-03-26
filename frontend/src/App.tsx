@@ -2076,8 +2076,8 @@ function App() {
               </div>
             </div>
             {parserListError ? <p className="state-text state-text--error">{parserListError}</p> : null}
-            <div className="table-shell">
-              <table className="admin-table">
+            <div className="table-shell table-shell--detail">
+              <table className="admin-table admin-table--sticky">
                 <thead>
                   <tr>
                     <th>配置名称</th>
@@ -2088,7 +2088,7 @@ function App() {
                     <th>起始行</th>
                     <th>结束列</th>
                     <th>状态</th>
-                    <th>操作</th>
+                    <th className="sticky-column--right">操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2107,13 +2107,13 @@ function App() {
                         <td>{config.data_start_row_index}</td>
                         <td>{config.data_end_column}</td>
                         <td><span className={`status-chip status-chip--${config.status}`}>{config.status}</span></td>
-                        <td>
+                        <td className="sticky-column--body-right">
                           <div className="row-actions">
-                            <button type="button" className="text-button" onClick={() => { setSelectedConfigId(config.id); setParserDialogMode('detail') }}>查看</button>
-                            <button type="button" className="text-button" onClick={() => openEditParserDialog(config)}>编辑</button>
+                            <button type="button" className="text-button text-button--view" onClick={() => { setSelectedConfigId(config.id); setParserDialogMode('detail') }}>查看</button>
+                            <button type="button" className="text-button text-button--edit" onClick={() => openEditParserDialog(config)}>编辑</button>
                             <button
                               type="button"
-                              className="text-button"
+                              className="text-button text-button--delete"
                               onClick={() =>
                                 openDeleteConfirm({
                                   title: '删除解析配置',
@@ -2180,8 +2180,8 @@ function App() {
 
             <section className="panel">
               <div className="panel-toolbar"><h2>最近导入任务</h2></div>
-              <div className="table-shell">
-                <table className="admin-table">
+              <div className="table-shell table-shell--detail">
+                <table className="admin-table admin-table--sticky">
                   <thead>
                     <tr>
                       <th>文件名</th>
@@ -2190,7 +2190,7 @@ function App() {
                       <th>进度</th>
                       <th>结果</th>
                       <th>时间</th>
-                      <th>操作</th>
+                      <th className="sticky-column--right">操作</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2221,10 +2221,10 @@ function App() {
                             {task.error_message || (task.imported_rows > 0 ? `${task.imported_rows} 行` : '-')}
                           </td>
                           <td>{task.created_at.replace('T', ' ').slice(0, 19)}</td>
-                          <td>
+                          <td className="sticky-column--body-right">
                             <button
                               type="button"
-                              className="text-button"
+                              className="text-button text-button--delete"
                               disabled={task.status === 'pending' || task.status === 'running'}
                               onClick={() =>
                                 openDeleteConfirm({
@@ -2250,8 +2250,8 @@ function App() {
 
             <section className="panel">
               <div className="panel-toolbar"><h2>最近导入批次</h2></div>
-            <div className="table-shell">
-              <table className="admin-table">
+            <div className="table-shell table-shell--detail">
+              <table className="admin-table admin-table--sticky">
                 <thead>
                   <tr>
                     <th>批次号</th>
@@ -2261,7 +2261,7 @@ function App() {
                     <th>导入行数</th>
                     <th>状态</th>
                     <th>时间</th>
-                    <th>操作</th>
+                    <th className="sticky-column--right">操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2279,10 +2279,10 @@ function App() {
                         <td>{batch.imported_rows}</td>
                         <td><span className={`status-chip status-chip--${batch.status === 'success' ? 'active' : 'inactive'}`}>{batch.status}</span></td>
                         <td>{batch.created_at.replace('T', ' ').slice(0, 19)}</td>
-                        <td>
+                        <td className="sticky-column--body-right">
                           <button
                             type="button"
-                            className="text-button"
+                            className="text-button text-button--delete"
                             onClick={() =>
                               openDeleteConfirm({
                                 title: '删除导入批次',
@@ -2504,11 +2504,11 @@ function App() {
                 />
               </label>
             </div>
-            <div className="table-shell">
-              <table className="admin-table">
+            <div className="table-shell table-shell--detail">
+              <table className="admin-table admin-table--sticky">
                 <thead>
                   <tr>
-                    <th>
+                    <th className="sticky-column">
                       <input
                         type="checkbox"
                         checked={templateRules.length > 0 && selectedTemplateRuleIds.length === templateRules.length}
@@ -2521,7 +2521,7 @@ function App() {
                     <th>频次</th>
                     <th>导出配置</th>
                     <th>状态</th>
-                    <th>操作</th>
+                    <th className="sticky-column--right">操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2531,8 +2531,8 @@ function App() {
                     <tr><td colSpan={8} className="table-empty">暂无数据</td></tr>
                   ) : (
                     templateRules.map((rule) => (
-                      <tr key={rule.id} className={rule.id === selectedTemplateRuleId ? 'admin-row--active' : ''}>
-                        <td>
+                      <tr key={rule.id}>
+                        <td className="sticky-column sticky-column--body">
                           <input
                             type="checkbox"
                             checked={selectedTemplateRuleIds.includes(rule.id)}
@@ -2545,13 +2545,13 @@ function App() {
                         <td>{rule.rule_item['频次'] || '-'}</td>
                         <td>{(rule.outputs ?? []).map((item) => item.sheet_name).join(' / ') || '-'}</td>
                         <td><span className={`status-chip status-chip--${rule.status}`}>{rule.status}</span></td>
-                        <td>
+                        <td className="sticky-column--body-right">
                           <div className="row-actions">
-                            <button type="button" className="text-button" onClick={() => { setSelectedTemplateRuleId(rule.id); setTemplateDialogMode('detail') }}>查看</button>
-                            <button type="button" className="text-button" onClick={() => openEditTemplateDialog(rule)}>编辑</button>
+                            <button type="button" className="text-button text-button--view" onClick={() => { setSelectedTemplateRuleId(rule.id); setTemplateDialogMode('detail') }}>查看</button>
+                            <button type="button" className="text-button text-button--edit" onClick={() => openEditTemplateDialog(rule)}>编辑</button>
                             <button
                               type="button"
-                              className="text-button"
+                              className="text-button text-button--delete"
                               onClick={() =>
                                 openDeleteConfirm({
                                   title: '删除模板规则',
@@ -2725,7 +2725,9 @@ function App() {
                     <thead><tr>{previewResult.headers.map((header) => (<th key={header}>{header}</th>))}</tr></thead>
                     <tbody>
                       {previewResult.rows.map((row, rowIndex) => (
-                        <tr key={`preview-row-${rowIndex}`}>{row.map((cell, cellIndex) => (<td key={`preview-cell-${rowIndex}-${cellIndex}`}>{cell}</td>))}</tr>
+                        <tr key={`preview-row-${rowIndex}`}>
+                          {row.map((cell, cellIndex) => (<td key={`preview-cell-${rowIndex}-${cellIndex}`}>{cell}</td>))}
+                        </tr>
                       ))}
                     </tbody>
                   </table>

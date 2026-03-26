@@ -14,8 +14,8 @@ CREATE TABLE IF NOT EXISTS parser_config (
     status VARCHAR(16) NOT NULL DEFAULT 'active',
     version INTEGER NOT NULL DEFAULT 1,
     remark TEXT,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME NOT NULL DEFAULT (datetime(CURRENT_TIMESTAMP, '+8 hours')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime(CURRENT_TIMESTAMP, '+8 hours'))
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_parser_config_config_code ON parser_config (config_code);
@@ -30,8 +30,8 @@ CREATE TABLE IF NOT EXISTS parser_config_column (
     field_name VARCHAR(255) NOT NULL,
     sample_value VARCHAR(500),
     is_enabled BOOLEAN NOT NULL DEFAULT 1,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at DATETIME NOT NULL DEFAULT (datetime(CURRENT_TIMESTAMP, '+8 hours')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime(CURRENT_TIMESTAMP, '+8 hours')),
     FOREIGN KEY (parser_config_id) REFERENCES parser_config (id) ON DELETE CASCADE
 );
 
@@ -47,8 +47,8 @@ CREATE TABLE IF NOT EXISTS import_batch (
     status VARCHAR(16) NOT NULL DEFAULT 'success',
     imported_rows INTEGER NOT NULL DEFAULT 0,
     error_message TEXT,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at DATETIME NOT NULL DEFAULT (datetime(CURRENT_TIMESTAMP, '+8 hours')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime(CURRENT_TIMESTAMP, '+8 hours')),
     FOREIGN KEY (parser_config_id) REFERENCES parser_config (id) ON DELETE CASCADE
 );
 
@@ -66,14 +66,19 @@ CREATE TABLE IF NOT EXISTS import_task (
     progress_message VARCHAR(255),
     imported_rows INTEGER NOT NULL DEFAULT 0,
     error_message TEXT,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at DATETIME NOT NULL DEFAULT (datetime(CURRENT_TIMESTAMP, '+8 hours')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime(CURRENT_TIMESTAMP, '+8 hours')),
     FOREIGN KEY (parser_config_id) REFERENCES parser_config (id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS ix_import_task_parser_config_id ON import_task (parser_config_id);
 CREATE INDEX IF NOT EXISTS ix_import_task_batch_code ON import_task (batch_code);
 CREATE INDEX IF NOT EXISTS ix_import_task_status ON import_task (status);
+
+CREATE TABLE IF NOT EXISTS import_task_queue_lock (
+    lock_name VARCHAR(64) PRIMARY KEY,
+    locked_at DATETIME NOT NULL DEFAULT (datetime(CURRENT_TIMESTAMP, '+8 hours'))
+);
 
 CREATE TABLE IF NOT EXISTS template_rule_set (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -86,8 +91,8 @@ CREATE TABLE IF NOT EXISTS template_rule_set (
     rule_config_json TEXT NOT NULL DEFAULT '{}',
     status VARCHAR(16) NOT NULL DEFAULT 'active',
     version INTEGER NOT NULL DEFAULT 1,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME NOT NULL DEFAULT (datetime(CURRENT_TIMESTAMP, '+8 hours')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime(CURRENT_TIMESTAMP, '+8 hours'))
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_template_rule_set_rule_code ON template_rule_set (rule_code);

@@ -1,5 +1,6 @@
 ﻿[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 $OutputEncoding = [Console]::OutputEncoding
+$env:TZ = "Asia/Shanghai"
 
 $RootDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $CheckOnly = $false
@@ -209,6 +210,7 @@ if ($CheckOnly) {
 $backendCmd = @"
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding(`$false)
 `$OutputEncoding = [Console]::OutputEncoding
+`$env:TZ = 'Asia/Shanghai'
 Set-Location '$RootDir/backend'
 `$Host.UI.RawUI.WindowTitle = 'xgd-excel-useful - 后端服务'
 Write-Host '========================================' -ForegroundColor Yellow
@@ -225,6 +227,7 @@ uv run main.py
 $frontendCmd = @"
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding(`$false)
 `$OutputEncoding = [Console]::OutputEncoding
+`$env:TZ = 'Asia/Shanghai'
 Set-Location '$RootDir/frontend'
 `$Host.UI.RawUI.WindowTitle = 'xgd-excel-useful - 前端服务'
 Write-Host '========================================' -ForegroundColor Yellow
@@ -241,6 +244,7 @@ npm run dev
 $openBrowserCmd = @"
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding(`$false)
 `$OutputEncoding = [Console]::OutputEncoding
+`$env:TZ = 'Asia/Shanghai'
 `$backendHealthUrl = '$BackendHealthUrl'
 `$frontendUrl = '$FrontendUrl'
 

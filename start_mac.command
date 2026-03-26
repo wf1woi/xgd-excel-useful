@@ -1,5 +1,6 @@
 #!/bin/bash
 set -euo pipefail
+export TZ=Asia/Shanghai
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CHECK_ONLY="${1:-}"
@@ -149,6 +150,7 @@ OPEN_BROWSER_LAUNCHER="$RUNTIME_DIR/open_frontend_when_ready_mac.sh"
 cat > "$BACKEND_LAUNCHER" <<EOF
 #!/bin/bash
 set -euo pipefail
+export TZ=Asia/Shanghai
 echo "========================================"
 echo "后端服务窗口"
 echo "这个窗口负责运行后端 API 服务。"
@@ -164,6 +166,7 @@ EOF
 cat > "$FRONTEND_LAUNCHER" <<EOF
 #!/bin/bash
 set -euo pipefail
+export TZ=Asia/Shanghai
 echo "========================================"
 echo "前端服务窗口"
 echo "这个窗口负责运行前端页面服务。"
@@ -179,6 +182,7 @@ EOF
 cat > "$OPEN_BROWSER_LAUNCHER" <<EOF
 #!/bin/bash
 set -euo pipefail
+export TZ=Asia/Shanghai
 
 backend_url="$BACKEND_HEALTH_URL"
 frontend_url="$FRONTEND_URL"

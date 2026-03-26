@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from math import ceil
 
@@ -13,6 +14,9 @@ from app.schemas.export_preview import (
 )
 from app.services.dynamic_detail_table import DynamicDetailTableManager
 from app.services.fixed_field import build_fixed_field_columns
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -71,6 +75,17 @@ class ExportPreviewService:
         resolved_page = min(page, total_pages)
         start_index = (resolved_page - 1) * page_size
         paged_rows = active_sheet.rows[start_index:start_index + page_size]
+
+        logger.info(
+            "Export preview built. parser_config_id=%s template_rule_id=%s batch_code=%s output_key=%s page=%s page_size=%s total=%s",
+            parser_config_id,
+            template_rule_id,
+            workbook.import_batch_code,
+            active_sheet.output_key,
+            resolved_page,
+            page_size,
+            total,
+        )
 
         return ExportPreviewResponse(
             parser_config_name=workbook.parser_config_name,
@@ -159,6 +174,15 @@ class ExportPreviewService:
 
         if not sheets:
             raise ValueError("当前模板规则未配置任何导出结果")
+
+        logger.info(
+            "Export workbook preview built. parser_config_id=%s template_rule_id=%s batch_code=%s sheets=%s export_month=%s",
+            parser_config_id,
+            template_rule_id,
+            import_batches[0].batch_code,
+            len(sheets),
+            export_month or "",
+        )
 
         return WorkbookPreview(
             parser_config_name=parser_config.config_name,

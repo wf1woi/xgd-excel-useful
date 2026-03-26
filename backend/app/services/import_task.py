@@ -45,7 +45,7 @@ class ImportTaskService:
             stored_file_path=stored_file_path,
             status="pending",
             progress_percent=0,
-            progress_message="等待后台处理",
+            progress_message="已进入导入队列，等待处理",
             imported_rows=0,
             error_message=None,
         )
@@ -114,27 +114,9 @@ def save_import_task_file(file_name: str, content: bytes) -> str:
     return file_path.as_posix()
 
 
-def run_import_task(task_id: int, engine) -> None:
-    db = SessionLocal()
-    task_repository = ImportTaskRepository(db)
-    parser_repository = ParserConfigRepository(db)
-    task_service = ImportTaskService(task_repository, parser_repository)
-    column_repository = ParserConfigColumnRepository(db)
-    batch_repository = ImportBatchRepository(db)
-    table_manager = DynamicDetailTableManager(engine)
-    import_batch_service = ImportBatchService(
-        parser_repository=parser_repository,
-        column_repository=column_repository,
-        batch_repository=batch_repository,
-        import_engine=ExcelImportEngine(),
-        table_manager=table_manager,
-    )
-
+def _process_import_task(task: ImportTask, task_service: ImportTaskService, import_batch_service: ImportBatchService) -> None:
+    task_id = task.id
     try:
-        task = task_repository.get_by_id(task_id)
-        if task is None:
-            return
-
         task_service.update_progress(task_id, 5, "正在读取文件", status="running")
         file_path = Path(task.stored_file_path)
         if not file_path.exists():
@@ -167,7 +149,13 @@ def run_import_task(task_id: int, engine) -> None:
             status="success",
         )
     except Exception as exc:
-        logger.exception("Import task failed. task_id=%s", task_id)
+        logger.exception(
+            "Import task failed. task_id=%s parser_config_id=%s batch_code=%s file_name=%s",
+            task_id,
+            task.parser_config_id,
+            task.batch_code,
+            task.file_name,
+        )
         task_service.update_progress(
             task_id,
             100,
@@ -175,5 +163,38 @@ def run_import_task(task_id: int, engine) -> None:
             status="failed",
             error_message=str(exc),
         )
+
+
+def run_import_task_queue(engine) -> None:
+    db = SessionLocal()
+    task_repository = ImportTaskRepository(db)
+    parser_repository = ParserConfigRepository(db)
+    task_service = ImportTaskService(task_repository, parser_repository)
+    column_repository = ParserConfigColumnRepository(db)
+    batch_repository = ImportBatchRepository(db)
+    table_manager = DynamicDetailTableManager(engine)
+    import_batch_service = ImportBatchService(
+        parser_repository=parser_repository,
+        column_repository=column_repository,
+        batch_repository=batch_repository,
+        import_engine=ExcelImportEngine(),
+        table_manager=table_manager,
+    )
+    lock_acquired = False
+
+    try:
+        lock_acquired = task_repository.acquire_queue_lock()
+        if not lock_acquired:
+            return
+        while True:
+            task = task_repository.claim_next_pending()
+            if task is None:
+                break
+            _process_import_task(task, task_service, import_batch_service)
     finally:
+        if lock_acquired:
+            try:
+                task_repository.release_queue_lock()
+            except Exception:
+                logger.exception("Failed to release import task queue lock")
         db.close()

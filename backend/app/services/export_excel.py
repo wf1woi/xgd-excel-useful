@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 
@@ -8,6 +9,9 @@ from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from app.services.export_preview import WorkbookPreview
+
+
+logger = logging.getLogger(__name__)
 
 
 class ExportExcelService:
@@ -53,6 +57,14 @@ class ExportExcelService:
         file_name = self._build_file_name(workbook_preview)
         file_path = self.export_dir / file_name
         workbook.save(file_path)
+        logger.info(
+            "Export Excel file created. file_path=%s parser_config_name=%s template_rule_name=%s batch_code=%s sheets=%s",
+            file_path,
+            workbook_preview.parser_config_name,
+            workbook_preview.template_rule_name,
+            workbook_preview.import_batch_code,
+            len(workbook_preview.sheets),
+        )
         return file_path
 
     def _build_file_name(self, workbook_preview: WorkbookPreview) -> str:

@@ -1,7 +1,9 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, MetaData, func
+from sqlalchemy import DateTime, MetaData
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+from app.utils.timezone import shanghai_now_naive
 
 
 NAMING_CONVENTION = {
@@ -20,12 +22,12 @@ class Base(DeclarativeBase):
 class TimestampMixin:
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False),
-        server_default=func.now(),
+        default=shanghai_now_naive,
         nullable=False,
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False),
-        server_default=func.now(),
-        onupdate=func.now(),
+        default=shanghai_now_naive,
+        onupdate=shanghai_now_naive,
         nullable=False,
     )
